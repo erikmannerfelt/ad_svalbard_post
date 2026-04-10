@@ -7,6 +7,9 @@ import geopandas as gpd
 import shapely.ops
 import numpy as np
 import scipy.interpolate
+import base64, io
+import xml.etree.ElementTree as ET
+from PIL import Image
 
 from pathlib import Path
 
@@ -14,7 +17,7 @@ CACHE_DIR = (Path(__file__).absolute() / "../cache").resolve()
 CACHE_DIR.mkdir(exist_ok=True)
 CRS_EPSG = 32633
 
-DHDT_VLIM = 3
+DHDT_VLIM = 2
 DHDT_COLORS = [
     (-DHDT_VLIM, "#400912"),
     (-0.75 * DHDT_VLIM, "#630d1c"),
@@ -288,6 +291,7 @@ def plot_regional_dhdt_fig(glacier_zones):
                 markerfacecolor=zone["color"],
                 markeredgecolor="#ccc",
                 barsabove=True,
+                alpha=1.0,
                 zorder=i + 1,
             )
 
@@ -506,14 +510,109 @@ def get_dhdt():
     # plt.bar(bins[~empty], np.log10(hist[~empty])) 
     plt.show()
 
+def svg_png_to_jpg(svg_path: Path | str, out_path: Path | str | None = None, *, quality=90):
+    svg_ns = "http://www.w3.org/2000/svg"
+    xlink_ns = "http://www.w3.org/1999/xlink"
+
+    ET.register_namespace("", svg_ns)
+    ET.register_namespace("xlink", xlink_ns)
+    out_path = svg_path if out_path is None else out_path
+
+    tree = ET.parse(svg_path)
+    root = tree.getroot()
+
+    for img in root.findall(f".//{{{svg_ns}}}image"):
+        href = img.get(f"{{{xlink_ns}}}href")
+        if not href or not href.startswith("data:image/png;base64,"):
+            continue
+
+        data = base64.b64decode(href.split(",", 1)[1])
+        im = Image.open(io.BytesIO(data))
+
+        if im.mode == "RGBA":
+            bg = Image.new("RGB", im.size, (255, 255, 255))
+            bg.paste(im, mask=im.split()[-1])
+            im = bg
+        else:
+            im = im.convert("RGB")
+
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=quality, subsampling=0)
+
+        img.set(
+            f"{{{xlink_ns}}}href",
+            "data:image/jpeg;base64,"
+            + base64.b64encode(buf.getvalue()).decode("ascii"),
+        )
+
+    tree.write(out_path, encoding="utf-8", xml_declaration=True)
 
 def dhdt_overview_fig():
     import rasterio
+    import rasterio.features
 
-    with rasterio.open("input/trend_2013-2018_slope_20260409.tif") as raster:
-        print(raster.width, raster.height)
+    coasts = make_coastline_intervals()
+
+    fig = plt.figure(figsize=(8.3, 5.3))
+    axes: list[plt.Axes] = fig.subplots(1, 2, sharex=True, sharey=True).ravel().tolist() # type: ignore
+
+    all_params = [
+        {
+            "filepath": "input/trend_2013-2018_slope_20260409.tif",
+            "title": "2013–2018",
+            "coast": coasts.loc["13_18"],
+        },
+        {
+            "filepath": "input/trend_2019-2024_slope_20260409.tif",
+            "title": "2019–2024",
+            "coast": coasts.loc["19_24"],
+        }
+    ]
+
+    for i, params in enumerate(all_params):
+        with rasterio.open(params["filepath"]) as raster:
+            img = DHDT_SM.to_rgba(raster.read(1, masked=True).filled(0))
+            ocean = rasterio.features.rasterize(
+                (params["coast"].geometry,),
+                out_shape=(raster.height, raster.width),
+                fill=0,
+                transform=raster.transform
+            ) == 0
+
+            img[ocean, :] = 1.
+
+            axes[i].imshow(
+                img,
+                extent=(raster.bounds.left, raster.bounds.right, raster.bounds.bottom, raster.bounds.top),
+            )
+
+
+        axes[i].set_xlim(4e5, 7.4e5)
+        axes[i].set_ylim(8.5e6, 8.95e6)
+        axes[i].set_xlabel("Easting (m; UTM 33N)")
+        axes[i].set_title(params["title"])
+        axes[i].ticklabel_format(scilimits=(0, 0))
+            
+
+    # Add map color bar
+    inset = axes[1].inset_axes((0.6, 0.05, 0.1, 0.1))
+    cbar = plt.colorbar(DHDT_SM,cax=inset, pad=0.02)
+    plt.text(0.1, 1.25, "dH dt$^{-1}$", transform=inset.transAxes)
+    plt.text(1.15, 0.5, "m a$^{-1}$", ha="left", va="center", transform=inset.transAxes )
+    cbar.set_ticks([DHDT_NORMALIZER.vmin, DHDT_NORMALIZER.vmax], labels=[f"{v:.0f}" for v in (DHDT_NORMALIZER.vmin, DHDT_NORMALIZER.vmax)]) # type: ignore
+
+    axes[0].set_ylabel("Northing (m; UTM 33N)")
+
+    plt.tight_layout(h_pad=1.08, w_pad=0.2)
+    out_path = "figures/perinterval_slope_overview.svg"
+    plt.savefig(out_path, dpi=400)
+    svg_png_to_jpg(out_path)
+    plt.show()
 
     
+    
+
+
 
 if __name__ == "__main__":
     main()
