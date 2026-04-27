@@ -1,3 +1,5 @@
 figures/
 cache/
 __pycache__/
+tables/
+input/
