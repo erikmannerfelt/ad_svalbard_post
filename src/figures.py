@@ -78,12 +78,45 @@ def plot_terrain_err():
         tick_labels[col] = [f"({edge:.1f})" for edge in edges]
 
     fig = plt.figure()
-    axes = fig.subplots(e_cols.shape[0], n_cols.shape[0])
+    outer = fig.add_gridspec(e_cols.shape[0], n_cols.shape[0], wspace=0.25, hspace=0.25)
 
-    for i, (_, sub0) in enumerate(data.groupby("e_mid")):
-        for j, (_, subset) in enumerate(sub0.groupby("n_mid")):
-            ax: plt.Axes = axes[i, j]
+    for i, e_mid in enumerate(e_cols):
+        sub0 = data[data["e_mid"] == e_mid]
+        for j, n_mid in enumerate(n_cols):
+            subset = sub0[sub0["n_mid"] == n_mid]
+            panel = outer[i, j].subgridspec(2, 2, height_ratios=[1, 4], width_ratios=[4, 1], wspace=0.05, hspace=0.05)
+            ax_top: plt.Axes = fig.add_subplot(panel[0, 0])
+            ax: plt.Axes = fig.add_subplot(panel[1, 0], sharex=ax_top)
+            ax_right: plt.Axes = fig.add_subplot(panel[1, 1], sharey=ax)
 
+            top_counts = subset.groupby(xcol, sort=False)["count"].sum()
+            right_counts = subset.groupby(ycol, sort=False)["count"].sum()
+
+            for interval, count in top_counts.items():
+                left = edge_to_percentile[xcol](interval.left)
+                right = edge_to_percentile[xcol](interval.right)
+                ax_top.bar(
+                    left + (right - left) / 2,
+                    count,
+                    width=right - left,
+                    align="center",
+                    color="#666",
+                    edgecolor="#444",
+                    linewidth=0.5,
+                )
+
+            for interval, count in right_counts.items():
+                bottom = edge_to_percentile[ycol](interval.left)
+                top = edge_to_percentile[ycol](interval.right)
+                ax_right.barh(
+                    bottom + (top - bottom) / 2,
+                    count,
+                    height=top - bottom,
+                    align="center",
+                    color="#666",
+                    edgecolor="#444",
+                    linewidth=0.5,
+                )
 
             for _, row in subset.iterrows():
                 ax.add_patch(plt.Rectangle(
@@ -96,9 +129,20 @@ def plot_terrain_err():
                     linewidth=1,
                 ))
 
-
             for col, axis in [(xcol, ax.xaxis), (ycol, ax.yaxis)]:
                 axis.set_ticks(ticks[col], tick_labels[col], fontsize=8)
                 axis._set_lim(0, 100, auto=False)
+
+            ax_top.set_xlim(0, 100)
+            ax_right.set_ylim(0, 100)
+            ax_top.tick_params(axis="x", labelbottom=False)
+            ax_top.tick_params(axis="y", left=False, labelleft=False)
+            ax_right.tick_params(axis="x", bottom=False, labelbottom=False)
+            ax_right.tick_params(axis="y", labelleft=False, labelright=False)
+
+            ax_top.spines["right"].set_visible(False)
+            ax_top.spines["top"].set_visible(False)
+            ax_right.spines["top"].set_visible(False)
+            ax_right.spines["right"].set_visible(False)
 
     plt.show()
