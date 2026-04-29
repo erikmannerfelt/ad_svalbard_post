@@ -233,43 +233,43 @@ def sample_rasters(redo: bool = False) -> gpd.GeoDataFrame:
     return gpd.read_feather(cache_path)
 
 
-def plot_regional_dhdt_fig(glacier_zones):
+def plot_regional_dhdt_fig(all_changes, glacier_zones):
     all_params = [
         {
-            "xcol": "slope_13_18",
-            "ycol": "slope_19_24",
-            "col_suffix": "",
-            "unit": "rate",
+            "xcol": "slope_start_mid",
+            "ycol": "slope_mid_end",
+            "partition": "all",
+            "unit": "elev_rate",
             "vlim": [-1.5, 0.2],
             "lessneg_text_xy": (0.68, 0.82),
             "moreneg_text_xy": (0.87, 0.68),
             "out_stem": "perzone_elevation_change",
         },
         {
-            "xcol": "slope_13_18",
-            "ycol": "slope_19_24",
-            "unit": "rate",
-            "col_suffix": "_nonsurging",
-            "vlim": [-1.15, 0.2],
+            "xcol": "slope_start_mid",
+            "ycol": "slope_mid_end",
+            "unit": "elev_rate",
+            "partition": "nonsurging",
+            "vlim": [-1.5, 0.2],
             "lessneg_text_xy": (0.68, 0.82),
             "moreneg_text_xy": (0.87, 0.68),
             "out_stem": "perzone_elevation_change_nonsurging",
         },
         {
-            "xcol": "slope_13_18_vol",
-            "ycol": "slope_19_24_vol",
+            "xcol": "slope_start_mid",
+            "ycol": "slope_mid_end",
             "unit": "vol_rate",
-            "col_suffix": "",
+            "partition": "all",
             "vlim": [-10.5, 1],
             "lessneg_text_xy": (0.68, 0.82),
             "moreneg_text_xy": (0.87, 0.68),
             "out_stem": "perzone_volume_change",
         },
         {
-            "xcol": "slope_13_18_vol",
-            "ycol": "slope_19_24_vol",
+            "xcol": "slope_start_mid",
+            "ycol": "slope_mid_end",
             "unit": "vol_rate",
-            "col_suffix": "_nonsurging",
+            "partition": "nonsurging",
             "vlim": [-6, 1],
             "lessneg_text_xy": (0.68, 0.82),
             "moreneg_text_xy": (0.87, 0.68),
@@ -280,25 +280,40 @@ def plot_regional_dhdt_fig(glacier_zones):
     for params in all_params:
         fig = plt.figure(figsize=(5, 4.9))
 
-        xcol_interval = f"20{params['xcol'].split('_')[1]}-20{params['xcol'].split('_')[2]}"
-        ycol_interval = f"20{params['ycol'].split('_')[1]}-20{params['ycol'].split('_')[2]}"
+        interval_translation = {
+            "start_end": "2013-2024",
+            "start_mid": "2013-2018",
+            "mid_end": "2019-2024",
+        }
 
-        unit_scale = {"rate": 1., "vol_rate": 1e-9}.get(params["unit"])
-        unit = {"vol_rate": "km$^{3}$ a$^{-1}$", "rate": "m a$^{-1}$"}.get(params["unit"])
-        axis_label = {"vol_rate": "Volume change rate", "rate": "Elevation change rate"}.get(params["unit"])
+        xcol_interval = interval_translation[params["xcol"].replace("slope_", "")]
+        ycol_interval = interval_translation[params["ycol"].replace("slope_", "")]
+        # xcol_interval = f"20{params['xcol'].split('_')[1]}-20{params['xcol'].split('_')[2]}"
+        # ycol_interval = f"20{params['ycol'].split('_')[1]}-20{params['ycol'].split('_')[2]}"
+        # xcol_interval = "2013-2018" if "start_end" in begin_col 
+
+        # unit_scale = {"rate": 1., "vol_rate": 1e-9}.get(params["unit"])
+        unit =all_changes["units"][params["unit"]]
+        # unit = {"vol_rate": "km$^{3}$ a$^{-1}$", "elev_rate": "m a$^{-1}$"}.get(params["unit"])
+        axis_label = {"vol_rate": "Volume change rate", "elev_rate": "Elevation change rate"}.get(params["unit"])
         plt.title(f"Regional {axis_label.lower()} " + ("(non-surging)" if "nonsurging" in params["out_stem"] else ""))
         inset = plt.gca().inset_axes([0., 0.5, 0.4, 0.5])
         # inset.set_axis_off()
         glacier_zones.plot(color=glacier_zones["color"], ax=inset)
-        for i, (label, zone) in enumerate(glacier_zones.sort_values("area" + params["col_suffix"], ascending=False).iterrows()):
+
+        xdata = all_changes["changes"][params["xcol"]][params["partition"]]["per_zone"]
+        ydata = all_changes["changes"][params["ycol"]][params["partition"]]["per_zone"]
+        for i, (label, zone_xdata) in enumerate(xdata.items()):
+            zone = glacier_zones.loc[label]
+            zone_ydata = ydata[label]
             plt.errorbar(
-                x=zone[params["xcol"] + params["col_suffix"]] * unit_scale,
-                y=zone[params["ycol"] + params["col_suffix"]] * unit_scale,
-                yerr=zone[params["xcol"] + "_err" + params["col_suffix"]] * unit_scale,
-                xerr=zone[params["ycol"] + "_err" + params["col_suffix"]] * unit_scale,
+                x=zone_xdata[params["unit"]],
+                y=zone_ydata[params["unit"]],
+                xerr=zone_xdata[params["unit"] + "_err"],
+                yerr=zone_ydata[params["unit"] + "_err"],
                 color="black",
                 marker="o",
-                markersize=0.8 * zone["area" + params["col_suffix"]] / 1e8,
+                markersize=0.8 * zone_xdata["area"] / 1e2,
                 markerfacecolor=zone["color"],
                 markeredgecolor="#ccc",
                 barsabove=True,
@@ -306,7 +321,8 @@ def plot_regional_dhdt_fig(glacier_zones):
                 zorder=i + 1,
             )
 
-            xy_text = (zone[params["xcol"] + params["col_suffix"]] * unit_scale, zone[params["ycol"] + params["col_suffix"]] * unit_scale)
+            # xy_text = (zone[params["xcol"] + params["col_suffix"]], zone[params["ycol"] + params["col_suffix"]])
+            xy_text = (zone_xdata[params["unit"]], zone_ydata[params["unit"]])
 
             # if label == "NW":
             #     xy_text = (xy_text[0] - 0.35, xy_text[1] - 0.28)
@@ -350,6 +366,9 @@ def get_dhdt():
     # return
 
     outlines = sample_rasters()
+
+    # Tinkarpbreen
+    outlines.loc[outlines["rgi_id"] == "RGI2000-v7.0-G-07-00560", "surging"] = True
 
     to_v_keys = ["slope_13_24", "slope_13_18", "slope_19_24", "accel_13_24"]
     for key in to_v_keys:
@@ -398,57 +417,73 @@ def get_dhdt():
     neff_model = get_neff_model()
     # o
 
-    record_information(
-        {
+    all_changes = {
             "units": {
                 "vol_rate": "km$^{3}$~a$^{-1}$",
-                "vol_accel": "km$^{3}$~a$^{-2}$"
+                "vol_accel": "km$^{3}$~a$^{-2}$",
+                "elev_rate": "m~a$^{-1}$"
             },
             "parameters": {
                 "positive_change_threshold": 0.1,
             },
         }
-    )
 
+
+    all_changes["changes"] = {}
     for key in to_v_keys:
         vol_col = key + "_vol"
         err_col = key + "_err"
         vol_err_col = key + "_vol_err"
 
-        for suffix, zone_grouped in [("", per_zone_grouped), ("_nonsurging", per_zone_nonsurging_grouped)]:
-            glacier_zones["area" + suffix] = per_zone_grouped["area"].sum()
-            glacier_zones[vol_col + suffix] = zone_grouped[vol_col].sum()
-            glacier_zones[vol_err_col + suffix] = per_zone_grouped[vol_err_col + "_unscaled"].sum() / (neff_model(per_zone_grouped["area"].sum()) ** 0.5)
-            # glacier_zones[vol_err_col + suffix] = zone_grouped[vol_err_col].sum()
+        changes = {}
+        for partition, query in [("all", ""), ("surging", "surging"), ("nonsurging", "~surging")]:
 
-            glacier_zones[key + suffix] = glacier_zones[f"{vol_col}{suffix}"] / glacier_zones[f"area{suffix}"]
-            glacier_zones[err_col + suffix] = glacier_zones[vol_err_col] / glacier_zones[f"area{suffix}"]
+            for zone_label in ["allzones", *glacier_zones.index]:
+                if partition == "all":
+                    subset = outlines
+                else:
+                    subset = outlines.query(query)
+                if zone_label != "allzones":
+                    subset = subset.query(f"zone_label == '{zone_label}'")
+
+                total_area = subset["area"].sum()
+
+                vol_rate = subset[vol_col].sum()
+                vol_rate_err = subset[vol_err_col].sum() / (neff_model(total_area) ** 0.5)
+
+                new_changes = {
+                    "vol_rate": vol_rate / 1e9,
+                    "vol_rate_err": vol_rate_err / 1e9,
+                    "positive_vol": subset[f"{key}_positive_vol"].sum() / 1e9,
+                    "area": total_area / 1e6,
+                    "elev_rate": vol_rate / total_area,
+                    "elev_rate_err": vol_rate_err / total_area,
+                }
+
+                if partition != "all" or zone_label != "allzones": 
+                    denom = "all" if zone_label == "allzones" else partition
+                    new_changes["vol_rate_percent"] = round(100 * new_changes["vol_rate"] / changes[denom]["vol_rate"])
+
+                if zone_label == "allzones":
+                    changes[partition] = new_changes
+                else:
+                    if "per_zone" not in changes[partition]:
+                        changes[partition]["per_zone"] = {}
+
+                    changes[partition]["per_zone"][zone_label] = new_changes
+        all_changes["changes"][key.replace("13", "start").replace("18", "mid").replace("19", "mid").replace("24", "end")] = changes
 
 
-        nonsurging_positive_volume = outlines.query("~surging")[f"{key}_positive_vol"].sum() / 1e9
-        positive_nonsurge = 100 * outlines.query("~surging")[f"{key}_positive_area"].sum() / outlines.query("~surging")["area"].sum()
-
-        change_rate = outlines[vol_col].sum()
-        change_rate_err = outlines[vol_err_col].sum() / (neff_model(outlines["area"].sum()) ** 0.5)
-        surging_change_rate = outlines.query('surging')[vol_col].sum()
-        surging_change_rate_err = outlines.query('surging')[vol_err_col].sum() / (neff_model(outlines.query("surging")["area"].sum()) ** 0.5)
-        nonsurging_change_rate = outlines.query('~surging')[vol_col].sum()
-        nonsurging_change_rate_err = outlines.query('~surging')[vol_err_col].sum() / (neff_model(outlines.query("~surging")["area"].sum()) ** 0.5)
-
-        per_zone = {}
-        for zone_label, zone in glacier_zones.iterrows():
-            per_zone[zone_label] = {
-                "name": zone["zone_name"],
-                "vol_rate": zone[vol_col] / 1e9,
-                "vol_rate_err": zone[vol_err_col] / 1e9,
-                "percentage_of_total": 100 * zone[vol_col] / glacier_zones[vol_col].sum(),
-            }
-            # print(f"- {zone['zone_name']}:\t{zone[vol_col] / 1e9:.2f}±{zone[vol_err_col] / 1e9:.2f} km³ / {yr_unit} ({100 * zone[vol_col] / glacier_zones[vol_col].sum():.2f}%)") 
+            
+        continue
+            
 
         record_information(
             {
                 "changes": {
                     key.replace("13", "start").replace("18", "mid").replace("19", "mid").replace("24", "end"):{
+                        "elev_rate": change_rate / outlines["area"].sum(),
+                        "elev_rate_err": change_rate_err / outlines["area"].sum(),
                         "vol_rate": change_rate / 1e9,
                         "vol_rate_err": change_rate_err / 1e9,
                         "nonsurging_positive_vol_rate": nonsurging_positive_volume / 1e9,
@@ -470,35 +505,59 @@ def get_dhdt():
             }
         )
 
-        print(vol_col)
-        yr_unit = "yr²" if "accel" in key else "yr" 
-        print(f"Nonsurging positive sum: {nonsurging_positive_volume:.2f} km³ / {yr_unit}" )
-        print(f"Nonsurging positive area: {positive_nonsurge:.2f}%")
-        print(f"Change rate: {change_rate / 1e9:.2f}±{change_rate_err / 1e9:.2f} km³ / {yr_unit}")
-        print(f"\tSurging change rate: {surging_change_rate / 1e9:.2f}±{surging_change_rate_err / 1e9:.2f} km³ / {yr_unit} ({100 * surging_change_rate / change_rate:.2f}%)")
-        print(f"\tNon-surging change rate: {nonsurging_change_rate / 1e9:.2f}±{nonsurging_change_rate_err / 1e9:.2f} km³ / {yr_unit} ({100 * nonsurging_change_rate / change_rate:.2f}%)")
+        # print(vol_col)
+        # yr_unit = "yr²" if "accel" in key else "yr" 
+        # print(f"Nonsurging positive sum: {nonsurging_positive_volume:.2f} km³ / {yr_unit}" )
+        # print(f"Nonsurging positive area: {positive_nonsurge:.2f}%")
+        # print(f"Change rate: {change_rate / 1e9:.2f}±{change_rate_err / 1e9:.2f} km³ / {yr_unit}")
+        # print(f"\tSurging change rate: {surging_change_rate / 1e9:.2f}±{surging_change_rate_err / 1e9:.2f} km³ / {yr_unit} ({100 * surging_change_rate / change_rate:.2f}%)")
+        # print(f"\tNon-surging change rate: {nonsurging_change_rate / 1e9:.2f}±{nonsurging_change_rate_err / 1e9:.2f} km³ / {yr_unit} ({100 * nonsurging_change_rate / change_rate:.2f}%)")
 
-        for _, zone in glacier_zones.iterrows():
-            print(f"- {zone['zone_name']}:\t{zone[vol_col] / 1e9:.2f}±{zone[vol_err_col] / 1e9:.2f} km³ / {yr_unit} ({100 * zone[vol_col] / glacier_zones[vol_col].sum():.2f}%)") 
+        # for _, zone in glacier_zones.iterrows():
+        #     print(f"- {zone['zone_name']}:\t{zone[vol_col] / 1e9:.2f}±{zone[vol_err_col] / 1e9:.2f} km³ / {yr_unit} ({100 * zone[vol_col] / glacier_zones[vol_col].sum():.2f}%)") 
         
-        print("\n\n")
+        # print("\n\n")
 
-    areas = outlines.groupby("surging")["area"].sum() / 1e6
-    record_information(
-        {
-            "area": {
-                "start_end": {
-                    "all": round(areas.sum()),
-                    "surging": round(areas[True]),
-                    "surging_percent": round(100 * areas[True] / areas.sum()),
-                    "nonsurging": round(areas[False]),
-                },
-            },
-        }
+    record_information({"changes": all_changes})
+    # return
 
-    )
+    # areas = outlines.groupby("surging")["area"].sum() / 1e6
+    # record_information(
+    #     {
+    #         "area": {
+    #             "start_end": {
+    #                 "all": round(areas.sum()),
+    #                 "surging": round(areas[True]),
+    #                 "surging_percent": round(100 * areas[True] / areas.sum()),
+    #                 "nonsurging": round(areas[False]),
+    #             },
+    #         },
+    #     }
+
+    # )
+    #
+    # print(outlines.columns)
+    fig = plt.figure(figsize=(4, 3))
+    for i, (issurging, items) in enumerate(outlines.groupby("surging")):
+
+        xvals = np.full(items.shape[0], float(issurging))
+        # xvals += np.random.default_rng(0).normal(scale=0.03, size=xvals.size)
+
+        plt.violinplot([np.log10(np.clip(-items["slope_13_24_vol"], a_min=1e-6, a_max=np.inf))], positions=[float(issurging)])
+        # plt.scatter(xvals, items["slope_13_24_vol"]) 
+
+    plt.ylim(10, 3)
+    plt.xticks([0, 1], ["Nonsurging", "Surging"])
+    yticks = plt.gca().get_yticks()
+    plt.yticks(yticks, labels=["10$^{" + str(int(ytick)) + "}$" for ytick in yticks])
+    plt.ylabel("Volume change rate (km³ / a)")
+    plt.tight_layout()
+    plt.savefig("figures/surging_vs_nonsurging_vol_violin.svg")
+    plt.show()
+    return
     
-    plot_regional_dhdt_fig(glacier_zones)
+    
+    plot_regional_dhdt_fig(all_changes=all_changes, glacier_zones=glacier_zones)
     
     fig = plt.figure(figsize=(4, 3))
     axes: list[plt.Axes] = fig.subplots(2, 1, sharex=True, sharey=False).ravel().tolist() # type: ignore
