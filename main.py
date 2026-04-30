@@ -147,12 +147,20 @@ def make_coastline_intervals() -> gpd.GeoDataFrame:
 
 
 def make_outlines():
-    coasts = make_coastline_intervals()
+    cache_path = CACHE_DIR / "rgi7_outlines.arrow"
+
     intervals = [
         ("13_18", 2013, 2018),
         ("19_24", 2019, 2024),
         ("13_24", 2013, 2024),
     ]
+
+    if cache_path.is_file():
+        out = gpd.read_feather(cache_path)
+        for interval, _, _ in intervals:
+            out[f"area_{interval}"] = out[f"geometry_{interval}"].area
+        return out
+    coasts = make_coastline_intervals()
 
     # rgi7_orig = gpd.read_file("input/RGI2000-v7.0-G-07_svalbard_jan_mayen.zip").to_crs(CRS_EPSG)
     rgi7_orig = gpd.read_file("zip://input/RGI_V7_Surge_Database.zip/RGI_V7_Surge_Database/RGI2000-v7.0-G-07_svalbard_jan_mayen_Surge_Database.shp").to_crs(CRS_EPSG)
@@ -222,7 +230,11 @@ def make_outlines():
         ]
 
     out = gpd.GeoDataFrame(out, geometry="geometry_13_24", crs=CRS_EPSG)
-    out.to_feather(CACHE_DIR / "rgi7_outlines.arrow")
+    for interval, _, _ in intervals:
+        out[f"area_{interval}"] = out[f"geometry_{interval}"].area
+    out.to_feather(cache_path)
+
+    return out
         
 
 def get_neff_model():
