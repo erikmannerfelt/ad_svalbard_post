@@ -257,6 +257,7 @@ def sample_rasters(redo: bool = False) -> gpd.GeoDataFrame:
         return gpd.read_feather(cache_path)
     import rasterio
     import rasterio.features
+    import rasterio.vrt
     neff_model = get_neff_model()
 
     outlines_path = CACHE_DIR / "rgi7_outlines.arrow"
@@ -281,13 +282,16 @@ def sample_rasters(redo: bool = False) -> gpd.GeoDataFrame:
     periglacial_by_short = {}
     res_by_short = {}
     data_by_short = {}
+    base_keys = []
 
     for short, kind, long, geom_col in intervals:
         base_key = f"{kind.replace('_tcorr', '')}_{short}"
+        base_keys.append(base_key)
         paths = {
             base_key: Path(f"input/trend_{long}_{kind}_{date}.tif"),
         }
-        paths[base_key + "_err_unscaled"] = paths[base_key].with_stem(paths[base_key].stem.replace(kind, kind + "_err"))
+        paths[base_key + "_temporal_err"] = paths[base_key].parent / f"trend_{long}_{kind}_temporal_err.tif"
+        paths[base_key + "_spatial_err_unscaled"] = paths[base_key + "_temporal_err"].with_stem(paths[base_key + "_temporal_err"].stem.replace("temporal", "spatial").replace("_tcorr", ""))
 
         data_by_short[short] = {}
 
@@ -304,16 +308,27 @@ def sample_rasters(redo: bool = False) -> gpd.GeoDataFrame:
             periglacial_by_short[short] = periglacial
             res_by_short[short] = raster.res[0]
 
+            transform = raster.transform
+            shape = rasterized.shape
+
         for key, filepath in paths.items():
             with rasterio.open(filepath) as raster:
-                window = rasterio.windows.from_bounds(*sampling_bounds, transform=raster.transform)
-                data_by_short[short][key] = (raster.read(1, masked=True, window=window, boundless=True)[~periglacial_by_short[short]].astype("float32") * raster.scales[0]).filled(np.nan)
+                scale = raster.scales[0]
+            with rasterio.open(filepath, overview_level=3 if "2026" not in filepath.stem else None) as orig_raster:
+
+                with rasterio.vrt.WarpedVRT(orig_raster, transform=transform, height=rasterized.shape[0], width=rasterized.shape[1]) as raster:
+                    # window = rasterio.windows.from_bounds(*sampling_bounds, transform=raster.transform)
+                    data_by_short[short][key] = (raster.read(1, masked=True)[~periglacial_by_short[short]].astype("float32") * scale).filled(np.nan)
 
     for short, _, _, _ in intervals:
         outlines[f"area_{short}"] = np.nan
         outlines[f"neff_{short}"] = np.nan
 
-    for idx, outline in tqdm.tqdm(outlines.iterrows()):
+    # i = 0
+    for idx, outline in tqdm.tqdm(outlines.iterrows(), total=outlines.shape[0]):
+        # i+= 1
+        # if i > 50:
+        #     break
         for short, _, _, _ in intervals:
             mask = rasterized_by_short[short] == outline["id"]
             area = np.count_nonzero(mask) * res_by_short[short] ** 2
@@ -326,28 +341,40 @@ def sample_rasters(redo: bool = False) -> gpd.GeoDataFrame:
             for key, arr in data_by_short[short].items():
                 outlines.loc[idx, key] = np.nanmean(arr[mask])
 
-                if "_err_unscaled" in key:
-                    outlines.loc[idx, key] *= 2  # Convert to 2sigma
-                    outlines.loc[idx, key.replace("_unscaled", "")] = outlines.loc[idx, key] / (outlines.loc[idx, f"neff_{short}"] ** 0.5)
-                else:
+                if "slope" in key and "_err" not in key:
                     outlines.loc[idx, f"{key}_positive_vol"] = np.nansum(arr[mask][arr[mask] > 0.]) * res_by_short[short] ** 2
                     outlines.loc[idx, f"{key}_positive_area"] = np.count_nonzero(arr[mask] > 0.1) * res_by_short[short] ** 2
 
-        if not pd.isna(outlines.loc[idx, "slope_13_18"]) and not pd.isna(outlines.loc[idx, "slope_19_24"]):
-            outlines.loc[idx, "accel_13_24"] = (outlines.loc[idx, "slope_19_24"] - outlines.loc[idx, "slope_13_18"]) / 6
-        if not pd.isna(outlines.loc[idx, "slope_13_18_err_unscaled"]) and not pd.isna(outlines.loc[idx, "slope_19_24_err_unscaled"]):
-            outlines.loc[idx, "accel_13_24_err_unscaled"] = np.hypot(outlines.loc[idx, "slope_19_24_err_unscaled"], outlines.loc[idx, "slope_13_18_err_unscaled"]) / 6
-            outlines.loc[idx, "accel_13_24_err"] = outlines.loc[idx, "accel_13_24_err_unscaled"] / (outlines.loc[idx, "neff_13_24"] ** 0.5)
 
-        if not pd.isna(outlines.loc[idx, "accel_13_24"]):
-            outlines.loc[idx, "accel_13_24_positive_vol"] = outlines.loc[idx, "accel_13_24"] * outlines.loc[idx, "area_13_24"]
+    for key in base_keys:
+        outlines[[f"{key}_spatial_err_unscaled", f"{key}_temporal_err"]] *= 2 # Convert to 2sigma
 
 
-    to_v_keys = ["slope_13_24", "slope_13_18", "slope_19_24", "accel_13_24"]
+    outlines["accel_13_24"] = (outlines["slope_19_24"] - outlines["slope_13_18"]) / 6
+    for err_col in ["spatial_err_unscaled", "temporal_err"]:
+        outlines[f"accel_13_24_{err_col}"] = np.hypot(outlines[f"slope_13_18_{err_col}"], outlines[f"slope_19_24_{err_col}"])
+
+
     key_to_interval = lambda s: "_".join(s.split("_")[-2:])
-    for key in to_v_keys:
-        for suffix in ["", "_err", "_err_unscaled"]:
+    for key in ["accel_13_24", *base_keys]:
+        outlines[f"{key}_spatial_err"] = outlines[f"{key}_spatial_err_unscaled"] / (outlines[f"neff_{key_to_interval(key)}"] ** 0.5)
+
+        outlines[f"{key}_err"] = outlines[[f"{key}_spatial_err", f"{key}_temporal_err"]].max(axis="columns")
+
+        for suffix in ["", "_err", "_spatial_err", "_spatial_err_unscaled", "_temporal_err"]:
             outlines[key + "_vol" + suffix] = outlines[key + suffix] * outlines[f"area_{key_to_interval(key)}"]
+            
+        # if not pd.isna(outlines.loc[idx, "slope_13_18"]) and not pd.isna(outlines.loc[idx, "slope_19_24"]):
+        #     outlines.loc[idx, "accel_13_24"] = (outlines.loc[idx, "slope_19_24"] - outlines.loc[idx, "slope_13_18"]) / 6
+        # if not pd.isna(outlines.loc[idx, "slope_13_18_spatial_err_unscaled"]) and not pd.isna(outlines.loc[idx, "slope_19_24_spatial_err_unscaled"]):
+        #     outlines.loc[idx, "accel_13_24_spatial_err_unscaled"] = np.hypot(outlines.loc[idx, "slope_19_24_spatial_err_unscaled"], outlines.loc[idx, "slope_13_18_spatial_err_unscaled"]) / 6
+        #     outlines.loc[idx, "accel_13_24_temporal_err"] = np.hypot(outlines.loc[idx, "slope_19_24_temporal_err"], outlines.loc[idx, "slope_13_18_temporal_err"]) / 6
+        #     outlines.loc[idx, "accel_13_24_spatial_err"] = outlines.loc[idx, "accel_13_24_spatial_err_unscaled"] / (outlines.loc[idx, "neff_13_24"] ** 0.5)
+
+        # if not pd.isna(outlines.loc[idx, "accel_13_24"]):
+        #     outlines.loc[idx, "accel_13_24_positive_vol"] = outlines.loc[idx, "accel_13_24"] * outlines.loc[idx, "area_13_24"]
+
+
     outlines.to_feather(cache_path)
     return gpd.read_feather(cache_path)
 
@@ -500,7 +527,7 @@ def get_statistics():
         
     neff_model = get_neff_model()
 
-    changes_stats = {
+    all_stats = {
             "units": {
                 "vol_rate": "km$^{3}$~a$^{-1}$",
                 "vol_accel": "km$^{3}$~a$^{-2}$",
@@ -512,7 +539,7 @@ def get_statistics():
         }
 
 
-    changes_stats["changes"] = {}
+    all_stats["changes"] = {}
     for key in to_v_keys:
         interval = key_to_interval(key)
 
@@ -534,20 +561,26 @@ def get_statistics():
                 total_area = np.max([subset[f"area_{interval}"].sum(), 1e-5])
 
                 vol_rate = subset[vol_col].sum()
-                vol_rate_err = subset[vol_err_col].sum() / (neff_model(total_area) ** 0.5)
+                # vol_rate_err = subset[vol_err_col].sum() / (neff_model(total_area) ** 0.5)
+                vol_rate_err = max(subset[vol_col + "_spatial_err_unscaled"].sum() / (neff_model(total_area) ** 0.5), subset[vol_col + "_temporal_err"].sum()) 
 
                 new_changes = {
                     "vol_rate": vol_rate / 1e9,
                     "vol_rate_err": vol_rate_err / 1e9,
-                    "positive_vol": subset[f"{key}_positive_vol"].sum() / 1e9,
                     "area": total_area / 1e6,
                     "elev_rate": vol_rate / total_area,
                     "elev_rate_err": vol_rate_err / total_area,
                 }
+                if "accel" not in key:
+                    new_changes["positive_vol"]= subset[f"{key}_positive_vol"].sum() / 1e9
+                    new_changes["positive_area"]= subset[f"{key}_positive_area"].sum() / 1e6
+
+                    new_changes["positive_area_frac"] =round (100* new_changes["positive_area"] / new_changes["area"])
 
                 if partition != "all" or zone_label != "allzones": 
                     denom = "all" if zone_label == "allzones" else partition
                     new_changes["vol_rate_percent"] = round(100 * new_changes["vol_rate"] / changes[denom]["vol_rate"])
+                    new_changes["area_percent"] = round(100 * new_changes["area"] / changes[denom]["area"])
 
                 if zone_label == "allzones":
                     changes[partition] = new_changes
@@ -556,16 +589,15 @@ def get_statistics():
                         changes[partition]["per_zone"] = {}
 
                     changes[partition]["per_zone"][zone_label] = new_changes
-        changes_stats["changes"][key.replace("13", "start").replace("18", "mid").replace("19", "mid").replace("24", "end")] = changes
+        all_stats["changes"][key.replace("13", "start").replace("18", "mid").replace("19", "mid").replace("24", "end")] = changes
 
 
-    all_stats = {"changes": changes_stats}
     record_information(all_stats) # type: ignore
     return all_stats
 
 
 def make_figs(show: bool = False):
-    changes_stats = get_statistics()["changes"]
+    changes_stats = get_statistics()
     outlines = sample_rasters()
     fig = plt.figure(figsize=(4, 3))
     for i, (issurging, items) in enumerate(outlines.groupby("surging_13_24")):

@@ -312,4 +312,33 @@ def plot_surge_nosurge_bar(show: bool = True):
 
     if show:
         plt.show()
+
+
+def plot_patch_method_vs_vgm():
+    with zipfile.ZipFile(INPUT_DIR / "aux_files.zip") as zip_file:
+        d = pd.read_csv(io.BytesIO(zip_file.read("patch_method_trend_2013-2024_slope.csv")))
+
+    rgi = gpd.read_feather("cache/outlines_sampled.arrow")
+
+    fig = plt.figure(figsize=(8, 4))
+    axes = fig.subplots(1, 3)
+    for i, (col, name) in enumerate([("slope_19_24_temporal_err", "Temporal"), ("slope_19_24_spatial_err", "Spatial"),("slope_19_24_err", "Combined")]):
+        ax: plt.Axes = axes.ravel()[i]
+
+        ax.set_title(name)
+        ax.scatter(d["exact_areas"] / 1e6, d["nmad"] * 2, marker="x", c="k", zorder=2, label="Patch method")
+        ax.scatter(rgi["area_km2"], rgi[col], alpha=0.3, edgecolor="none", label="Individual glaciers")
+        ax.set_xscale("log")
+        ax.set_xlim(0.04, 1300)
+        ax.set_ylim(0, 0.6)
+        if i == 0:
+            ax.set_ylabel("Uncertainty (m; 2x NMAD)")
+        if i == 1:
+            ax.legend()
+
+        ax.set_xlabel("Area (km²)")
+    fig.tight_layout()
+    fig.savefig("figures/patch_method_vs_vgm.svg")
+    plt.show()
+
     
