@@ -12,6 +12,7 @@ import base64, io
 import xml.etree.ElementTree as ET
 from PIL import Image
 import tqdm
+import dataclasses
 
 from record_information import record_information, format_float
 
@@ -162,7 +163,6 @@ def make_outlines():
         return out
     coasts = make_coastline_intervals()
 
-    # rgi7_orig = gpd.read_file("input/RGI2000-v7.0-G-07_svalbard_jan_mayen.zip").to_crs(CRS_EPSG)
     rgi7_orig = gpd.read_file("zip://input/RGI_V7_Surge_Database.zip/RGI_V7_Surge_Database/RGI2000-v7.0-G-07_svalbard_jan_mayen_Surge_Database.shp").to_crs(CRS_EPSG)
     rgi7_orig["geometry"] = rgi7_orig["geometry"].buffer(0)
 
@@ -175,6 +175,11 @@ def make_outlines():
         "RGI2000-v7.0-G-07-01383": {"glac_name": "Storisstraumen"},
         "RGI2000-v7.0-G-07-01385": {"glac_name": "Austfonna Basin-2"},
         "RGI2000-v7.0-G-07-01381": {"glac_name": "Austfonna Basin-5"},
+        "RGI2000-v7.0-G-07-00560": { # Tinkarpbreen
+            "S_Onset": "2012",
+            "S_Term": "Ongoing",
+
+        },
     }
 
     for rgi_id, overrides in field_overrides.items():
@@ -260,86 +265,96 @@ def sample_rasters(redo: bool = False) -> gpd.GeoDataFrame:
 
     outlines = gpd.read_feather(outlines_path)
     outlines["id"] = outlines["rgi_id"].str.split("-", expand=True).iloc[:, -1].astype(int)
-    outlines = outlines[~outlines.geometry.is_empty]
 
 
     glacier_zones = gpd.read_file("shapes/glacier_zones.geojson").to_crs(outlines.crs).set_index("zone_label")
-    outlines = gpd.sjoin(outlines, glacier_zones)
+    outlines = gpd.sjoin(outlines, glacier_zones).reset_index(drop=True)
 
     date = "20260424"
-    data = {}
-    with rasterio.open(f"input/trend_2013-2024_slope_{date}.tif") as raster:
-        rasterized = rasterio.features.rasterize([(geom, outline_id) for geom, outline_id in zip(outlines.geometry, outlines["id"])], out_shape=(raster.height, raster.width), fill=0, transform=raster.transform)
-        periglacial = rasterized == 0
-        rasterized = rasterized[~periglacial]
+    intervals = [
+        ("13_18", "slope", "2013-2018", "geometry_13_18"),
+        ("19_24", "slope_tcorr", "2019-2024", "geometry_19_24"),
+        ("13_24", "slope", "2013-2024", "geometry_13_24"),
+    ]
 
-        bounds =raster.bounds
+    rasterized_by_short = {}
+    periglacial_by_short = {}
+    res_by_short = {}
+    data_by_short = {}
 
-        # data[f"dhdt_13_24"] = raster.read(1, masked=True)[~periglacial].filled(np.nan)
-        res = raster.res[0]
-
-    # with rasterio.open(trend_dir / "trend_2013-2024_accel_20260309B.tif") as raster:
-    #     data["accel"] = (raster.read(1, masked=True)[~periglacial].astype("float32") * raster.scales[0]).filled(np.nan)
-    #
-    for short, kind, long in [
-        ("13_18", "slope", "2013-2018"),
-        ("19_24", "slope_tcorr", "2019-2024"),
-        ("13_24", "slope", "2013-2024"),
-        # ("13_24", "accel", "2013-2024"),
-    ]:
-        # date = "20260409" if kind == "slope" else "20260309B"
+    for short, kind, long, geom_col in intervals:
         base_key = f"{kind.replace('_tcorr', '')}_{short}"
         paths = {
             base_key: Path(f"input/trend_{long}_{kind}_{date}.tif"),
         }
-           
         paths[base_key + "_err_unscaled"] = paths[base_key].with_stem(paths[base_key].stem.replace(kind, kind + "_err"))
+
+        data_by_short[short] = {}
+
+        with rasterio.open(paths[base_key]) as raster:
+            sampling_bounds = raster.bounds
+            rasterized = rasterio.features.rasterize(
+                [(geom, outline_id) for geom, outline_id in zip(outlines[geom_col], outlines["id"]) if geom is not None and not geom.is_empty],
+                out_shape=(raster.height, raster.width),
+                fill=0,
+                transform=raster.transform,
+            )
+            periglacial = rasterized == 0
+            rasterized_by_short[short] = rasterized[~periglacial]
+            periglacial_by_short[short] = periglacial
+            res_by_short[short] = raster.res[0]
+
         for key, filepath in paths.items():
             with rasterio.open(filepath) as raster:
-                window = rasterio.windows.from_bounds(*bounds, transform=raster.transform)
-                data[key] = (raster.read(1, masked=True, window=window, boundless=True)[~periglacial].astype("float32") * raster.scales[0]).filled(np.nan)
+                window = rasterio.windows.from_bounds(*sampling_bounds, transform=raster.transform)
+                data_by_short[short][key] = (raster.read(1, masked=True, window=window, boundless=True)[~periglacial_by_short[short]].astype("float32") * raster.scales[0]).filled(np.nan)
 
-    data["accel_13_24"] = (data["slope_19_24"] - data["slope_13_18"]) / 6
-    data["accel_13_24_err_unscaled"] = np.hypot(data["slope_19_24_err_unscaled"], data["slope_13_18_err_unscaled"]) / 6
+    for short, _, _, _ in intervals:
+        outlines[f"area_{short}"] = np.nan
+        outlines[f"neff_{short}"] = np.nan
 
-    
-    outlines["area"] = np.nan
     for idx, outline in outlines.iterrows():
-        mask = rasterized == outline["id"]
-        area = np.count_nonzero(mask) * res ** 2
-        if area == 0:
-            continue
+        for short, _, _, _ in intervals:
+            mask = rasterized_by_short[short] == outline["id"]
+            area = np.count_nonzero(mask) * res_by_short[short] ** 2
+            if area == 0:
+                continue
 
-        outlines.loc[idx, "area"] = area
-        outlines.loc[idx, "neff"] = neff_model(area)
+            outlines.loc[idx, f"area_{short}"] = area
+            outlines.loc[idx, f"neff_{short}"] = neff_model(area)
 
-        for key, arr in data.items():
-            outlines.loc[idx, key] = np.nanmean(arr[mask])
-            # Manual bias correction at Kvitøyjøkulen
-            if outline["rgi_id"] == "RGI2000-v7.0-G-07-01583":
-                if key == "slope_13_24":
-                    outlines.loc[idx, key] += 1.5
+            for key, arr in data_by_short[short].items():
+                outlines.loc[idx, key] = np.nanmean(arr[mask])
 
-            if "_err_unscaled" in key:
-                outlines.loc[idx, key] *= 2  # Convert to 2sigma
-                outlines.loc[idx, key.replace("_unscaled", "")] = outlines.loc[idx, key] / (outlines.loc[idx, "neff"] ** 0.5)
-            else:
-                outlines.loc[idx, f"{key}_positive_vol"] = np.nansum(arr[mask][arr[mask] > 0.]) * res ** 2
-                outlines.loc[idx, f"{key}_positive_area"] = np.count_nonzero(arr[mask] > 0.1) * res ** 2
+                if "_err_unscaled" in key:
+                    outlines.loc[idx, key] *= 2  # Convert to 2sigma
+                    outlines.loc[idx, key.replace("_unscaled", "")] = outlines.loc[idx, key] / (outlines.loc[idx, f"neff_{short}"] ** 0.5)
+                else:
+                    outlines.loc[idx, f"{key}_positive_vol"] = np.nansum(arr[mask][arr[mask] > 0.]) * res_by_short[short] ** 2
+                    outlines.loc[idx, f"{key}_positive_area"] = np.count_nonzero(arr[mask] > 0.1) * res_by_short[short] ** 2
+
+        if not pd.isna(outlines.loc[idx, "slope_13_18"]) and not pd.isna(outlines.loc[idx, "slope_19_24"]):
+            outlines.loc[idx, "accel_13_24"] = (outlines.loc[idx, "slope_19_24"] - outlines.loc[idx, "slope_13_18"]) / 6
+        if not pd.isna(outlines.loc[idx, "slope_13_18_err_unscaled"]) and not pd.isna(outlines.loc[idx, "slope_19_24_err_unscaled"]):
+            outlines.loc[idx, "accel_13_24_err_unscaled"] = np.hypot(outlines.loc[idx, "slope_19_24_err_unscaled"], outlines.loc[idx, "slope_13_18_err_unscaled"]) / 6
+            outlines.loc[idx, "accel_13_24_err"] = outlines.loc[idx, "accel_13_24_err_unscaled"] / (outlines.loc[idx, "neff_13_24"] ** 0.5)
+
+        if not pd.isna(outlines.loc[idx, "accel_13_24"]):
+            outlines.loc[idx, "accel_13_24_positive_vol"] = outlines.loc[idx, "accel_13_24"] * outlines.loc[idx, "area_13_24"]
 
 
     outlines.to_feather(cache_path)
     return gpd.read_feather(cache_path)
 
 
-def plot_regional_dhdt_fig(all_changes, glacier_zones):
+def plot_regional_dhdt_fig(all_changes, glacier_zones, show: bool = True):
     all_params = [
         {
             "xcol": "slope_start_mid",
             "ycol": "slope_mid_end",
             "partition": "all",
             "unit": "elev_rate",
-            "vlim": [-1.5, 0.2],
+            "vlim": [-1.55, 0.2],
             "lessneg_text_xy": (0.68, 0.82),
             "moreneg_text_xy": (0.87, 0.68),
             "out_stem": "perzone_elevation_change",
@@ -387,17 +402,10 @@ def plot_regional_dhdt_fig(all_changes, glacier_zones):
 
         xcol_interval = interval_translation[params["xcol"].replace("slope_", "")]
         ycol_interval = interval_translation[params["ycol"].replace("slope_", "")]
-        # xcol_interval = f"20{params['xcol'].split('_')[1]}-20{params['xcol'].split('_')[2]}"
-        # ycol_interval = f"20{params['ycol'].split('_')[1]}-20{params['ycol'].split('_')[2]}"
-        # xcol_interval = "2013-2018" if "start_end" in begin_col 
-
-        # unit_scale = {"rate": 1., "vol_rate": 1e-9}.get(params["unit"])
         unit =all_changes["units"][params["unit"]]
-        # unit = {"vol_rate": "km$^{3}$ a$^{-1}$", "elev_rate": "m a$^{-1}$"}.get(params["unit"])
         axis_label = {"vol_rate": "Volume change rate", "elev_rate": "Elevation change rate"}.get(params["unit"])
         plt.title(f"Regional {axis_label.lower()} " + ("(non-surging)" if "nonsurging" in params["out_stem"] else ""))
         inset = plt.gca().inset_axes([0., 0.5, 0.4, 0.5])
-        # inset.set_axis_off()
         glacier_zones.plot(color=glacier_zones["color"], ax=inset)
 
         xdata = all_changes["changes"][params["xcol"]][params["partition"]]["per_zone"]
@@ -450,29 +458,22 @@ def plot_regional_dhdt_fig(all_changes, glacier_zones):
         Path("figures/").mkdir(exist_ok=True)
 
         plt.savefig(f"figures/{params['out_stem']}.svg")
-        plt.show()
+        if show:
+            plt.show()
         plt.close()
 
 def get_dhdt():
 
-    # neff_data = pd.read_csv("input/vgm_neff_cirq_numerical.csv", index_col=0).squeeze()
-    # plt.plot(neff_data.index, neff_data ** 0.5)
-    # neff_data = pd.read_csv("input/vgm_neff_cirq_theoretical.csv", index_col=0).squeeze()
-    # plt.plot(neff_data.index, neff_data ** 0.5)
-    # plt.xscale("log")
-    # plt.yscale("log")
-    # plt.show()
-    # return
-
     outlines = sample_rasters()
 
     # Tinkarpbreen
-    outlines.loc[outlines["rgi_id"] == "RGI2000-v7.0-G-07-00560", "surging"] = True
+    outlines.loc[outlines["rgi_id"] == "RGI2000-v7.0-G-07-00560", ["surging_13_18", "surging_13_24", "surging_19_24"]] = True
 
     to_v_keys = ["slope_13_24", "slope_13_18", "slope_19_24", "accel_13_24"]
+    key_to_interval = lambda s: "_".join(s.split("_")[-2:])
     for key in to_v_keys:
         for suffix in ["", "_err", "_err_unscaled"]:
-            outlines[key + "_vol" + suffix] = outlines[key + suffix] * outlines["area"]
+            outlines[key + "_vol" + suffix] = outlines[key + suffix] * outlines[f"area_{key_to_interval(key)}"]
         
     glacier_zones = gpd.read_file("shapes/glacier_zones.geojson").to_crs(outlines.crs).set_index("zone_label")
 
@@ -482,39 +483,7 @@ def get_dhdt():
 
     glacier_zones.geometry = glacier_zones.geometry.intersection(coasts.geometry[0])
 
-    # glacier_zones["color"] = glacier_zones["zone_label"].apply(
-    #     {
-    #         "NW": "#3d8673",
-    #         "N": "#174940",
-    #         "NE": "#cbebda",
-    #         "C": "#83cda9",
-    #         "S": "#7e3404",
-    #         "B": "#bb6a07",
-    #         "V": "#f6ebb6",
-    #         "A": "#ddbd5c",
-    #     }.get
-    # )
-    # glacier_zones.to_file("shapes/glacier_zones.geojson")
-    # return
-            
-    per_zone_grouped = outlines.groupby("zone_label")
-
-    per_zone_nonsurging_grouped = outlines.query("~surging").groupby("zone_label")
-    # glacier_zones[f"area_nonsurging"] =per_zone_nonsurging_grouped["area"].sum()
-    # glacier_zones_nonsurging = glacier_zones.copy()
-    # glacier_zones_nonsurging["area"] = per_zone_nonsurging_grouped["area"].sum()
-
-    # keys = [str(col) for col in outlines.columns if "dhdt" in col or "accel" in col]
-
-    # per_zone = outlines[["zone_name"]].first()
-    # per_zone["area"] = 
-
-    # for key in data:
-    #     per_zone = per_zone_grouped[
-
-    # neff_model = lambda a: np.clip(get_neff_model()(a), a_min=0, a_max=outlines["area_km2"].max())
     neff_model = get_neff_model()
-    # o
 
     all_changes = {
             "units": {
@@ -530,12 +499,14 @@ def get_dhdt():
 
     all_changes["changes"] = {}
     for key in to_v_keys:
+        interval = key_to_interval(key)
+
         vol_col = key + "_vol"
         err_col = key + "_err"
         vol_err_col = key + "_vol_err"
 
         changes = {}
-        for partition, query in [("all", ""), ("surging", "surging"), ("nonsurging", "~surging")]:
+        for partition, query in [("all", ""), ("surging", f"surging_{interval}"), ("nonsurging", f"~surging_{interval}")]:
 
             for zone_label in ["allzones", *glacier_zones.index]:
                 if partition == "all":
@@ -545,7 +516,7 @@ def get_dhdt():
                 if zone_label != "allzones":
                     subset = subset.query(f"zone_label == '{zone_label}'")
 
-                total_area = subset["area"].sum()
+                total_area = np.max([subset[f"area_{interval}"].sum(), 1e-5])
 
                 vol_rate = subset[vol_col].sum()
                 vol_rate_err = subset[vol_err_col].sum() / (neff_model(total_area) ** 0.5)
@@ -573,71 +544,9 @@ def get_dhdt():
         all_changes["changes"][key.replace("13", "start").replace("18", "mid").replace("19", "mid").replace("24", "end")] = changes
 
 
-            
-        continue
-            
-
-        record_information(
-            {
-                "changes": {
-                    key.replace("13", "start").replace("18", "mid").replace("19", "mid").replace("24", "end"):{
-                        "elev_rate": change_rate / outlines["area"].sum(),
-                        "elev_rate_err": change_rate_err / outlines["area"].sum(),
-                        "vol_rate": change_rate / 1e9,
-                        "vol_rate_err": change_rate_err / 1e9,
-                        "nonsurging_positive_vol_rate": nonsurging_positive_volume / 1e9,
-                        "nonsurging_positive_area_percent": positive_nonsurge,
-                        "surging": {
-                            "vol_rate": surging_change_rate / 1e9,
-                            "vol_rate_err": surging_change_rate_err / 1e9,
-                            "percentage_of_total": round(100 * surging_change_rate / change_rate),  
-                        },
-                        "nonsurging": {
-                            "vol_rate": nonsurging_change_rate / 1e9,
-                            "vol_rate_err": nonsurging_change_rate_err / 1e9,
-                            "percentage_of_total": round(100 * nonsurging_change_rate / change_rate),  
-                        },
-                        "regions": per_zone,
-                    }
-                },
-
-            }
-        )
-
-        # print(vol_col)
-        # yr_unit = "yr²" if "accel" in key else "yr" 
-        # print(f"Nonsurging positive sum: {nonsurging_positive_volume:.2f} km³ / {yr_unit}" )
-        # print(f"Nonsurging positive area: {positive_nonsurge:.2f}%")
-        # print(f"Change rate: {change_rate / 1e9:.2f}±{change_rate_err / 1e9:.2f} km³ / {yr_unit}")
-        # print(f"\tSurging change rate: {surging_change_rate / 1e9:.2f}±{surging_change_rate_err / 1e9:.2f} km³ / {yr_unit} ({100 * surging_change_rate / change_rate:.2f}%)")
-        # print(f"\tNon-surging change rate: {nonsurging_change_rate / 1e9:.2f}±{nonsurging_change_rate_err / 1e9:.2f} km³ / {yr_unit} ({100 * nonsurging_change_rate / change_rate:.2f}%)")
-
-        # for _, zone in glacier_zones.iterrows():
-        #     print(f"- {zone['zone_name']}:\t{zone[vol_col] / 1e9:.2f}±{zone[vol_err_col] / 1e9:.2f} km³ / {yr_unit} ({100 * zone[vol_col] / glacier_zones[vol_col].sum():.2f}%)") 
-        
-        # print("\n\n")
-
     record_information({"changes": all_changes})
-    # return
-
-    # areas = outlines.groupby("surging")["area"].sum() / 1e6
-    # record_information(
-    #     {
-    #         "area": {
-    #             "start_end": {
-    #                 "all": round(areas.sum()),
-    #                 "surging": round(areas[True]),
-    #                 "surging_percent": round(100 * areas[True] / areas.sum()),
-    #                 "nonsurging": round(areas[False]),
-    #             },
-    #         },
-    #     }
-
-    # )
-    #
-    # print(outlines.columns)
     fig = plt.figure(figsize=(4, 3))
-    for i, (issurging, items) in enumerate(outlines.groupby("surging")):
+    for i, (issurging, items) in enumerate(outlines.groupby("surging_13_24")):
 
         xvals = np.full(items.shape[0], float(issurging))
         # xvals += np.random.default_rng(0).normal(scale=0.03, size=xvals.size)
@@ -652,17 +561,16 @@ def get_dhdt():
     plt.ylabel("Volume change rate (km³ / a)")
     plt.tight_layout()
     plt.savefig("figures/surging_vs_nonsurging_vol_violin.svg")
-    plt.show()
-    return
+    plt.close()
     
     
-    plot_regional_dhdt_fig(all_changes=all_changes, glacier_zones=glacier_zones)
+    plot_regional_dhdt_fig(all_changes=all_changes, glacier_zones=glacier_zones, show=False)
     
     fig = plt.figure(figsize=(4, 3))
     axes: list[plt.Axes] = fig.subplots(2, 1, sharex=True, sharey=False).ravel().tolist() # type: ignore
     fig.subplots_adjust(left=0.135, bottom=0.165, right=0.995, top=0.98, hspace=0.1)
 
-    for i, (issurging, items) in enumerate(outlines.groupby("surging")):
+    for i, (issurging, items) in enumerate(outlines.groupby("surging_13_24")):
         axis = axes[i]
         vals = items["slope_13_24"].dropna()
         axis.hist(vals, bins=np.linspace(-5, 1, 30 if issurging else 100), color="#ff6666" if issurging else "#6699ff")
@@ -798,112 +706,115 @@ def dhdt_overview_fig():
 
     
     
-def hypsometric():
+def hypsometric(show: bool = True):
     import rasterio as rio
     import rasterio.features
 
     outlines = sample_rasters()
-    glacier_zones = gpd.read_file("shapes/glacier_zones.geojson").to_crs(outlines.crs).set_index("zone_label")
+    zone_meta = outlines[["zone_label", "zone_name"]].drop_duplicates().set_index("zone_label")
+    zone_ids = {label: i + 1 for i, label in enumerate(zone_meta.index)}
+    id_to_label = {i: label for label, i in zone_ids.items()}
 
-    glacier_zones["id"] = np.arange(glacier_zones.shape[0]) + 1
     elev_bins = np.linspace(-0.01, 1200.01, 11)
     elev_bin_centers = (elev_bins[1:] + elev_bins[:-1]) / 2
 
-    rasters = {
-        "dem": "input/trend_2013-2024_intercept.tif",
-        "2013-2018": "input/trend_2013-2018_slope.tif",
-        "2019-2024": "input/trend_2019-2024_slope.tif",
-    }
+    @dataclasses.dataclass
+    class Config:
+        interval_name: str
+        short: str
+        filepath: Path
+        color: np.ndarray
 
-    with rio.open(rasters["dem"]) as raster:
-        scale = raster.scales[0]
+    intervals = [
+        Config("2013-2018", "13_18", Path("input/trend_2013-2018_slope.tif"), DHDT_SM.to_rgba(1.)),
+        Config("2019-2024", "19_24", Path("input/trend_2019-2024_slope.tif"), DHDT_SM.to_rgba(-1.)),
+    ]
+    intercept_path = "input/trend_2013-2024_intercept.tif"
 
-    with rio.open(rasters["dem"], overview_level=3) as raster:
-
-        transform = raster.transform
-        bounds = raster.bounds
-        dem_arr = (raster.read(1, masked=True).astype("float32") * scale).filled(0)
-
-        zones_rasterized: np.ndarray = rasterio.features.rasterize(
-            [(zone["geometry"], zone["id"]) for _, zone in glacier_zones.iterrows()],
-            out_shape=dem_arr.shape,
-            transform=raster.transform,
-            dtype="uint8",
-        )
-
-        outlines_rasterized: np.ndarray = rasterio.features.rasterize(
-            outlines.query("~surging")["geometry"].values,
-            out_shape=dem_arr.shape,
-            transform=raster.transform,
-        ) == 1
-
-        zones_rasterized = zones_rasterized[outlines_rasterized]
-
-        dem_digitized = np.digitize(dem_arr, elev_bins)[outlines_rasterized]
-
-        del dem_arr
-
-
-    dhdt_arrs = {}
-
-    for key in ["2013-2018", "2019-2024"]:
-        with rio.open(rasters[key]) as raster:
-            scale = raster.scales[0]
-
-        with rio.open(rasters[key], overview_level=3) as raster:
-
-            window = rio.windows.from_bounds(*bounds, transform=raster.transform)
-
-            dhdt_arrs[key] = (raster.read(1, window=window, boundless=True, masked=True)[outlines_rasterized] * scale).filled(np.nan)
+    with rio.open(intercept_path) as dem_raster_full:
+        scale = dem_raster_full.scales[0]  # Only the non-overview band has this information
+    with rio.open(intercept_path, overview_level=3) as dem_raster:
+        dem_arr = (dem_raster.read(1, masked=True).astype("float32") * scale).filled(0)
+        dem_transform = dem_raster.transform
 
     per_zone = {}
-    for label, row in glacier_zones.iterrows():
-        zone_mask = zones_rasterized == row["id"]
+    for config in intervals:
+        geom_col = f"geometry_{config.short}"
+        nonsurging = outlines.loc[~outlines[f"surging_{config.short}"] & outlines[geom_col].notna()].copy()
+        nonsurging = nonsurging[~nonsurging[geom_col].is_empty]
 
-        vals = []
-        for idx in np.unique(dem_digitized):
-            if ((idx - 1) >= elev_bin_centers.shape[0]):
-                continue
-            mask = zone_mask & (dem_digitized == idx)
+        with rio.open(config.filepath) as dhdt_raster_full:
+            scale = dhdt_raster_full.scales[0] # Only the non-overview band has this information
+        with rio.open(config.filepath, overview_level=3) as dhdt_raster:
+            zone_raster = rasterio.features.rasterize(
+                [(geom, zone_ids[label]) for geom, label in zip(nonsurging[geom_col], nonsurging["zone_label"])],
+                out_shape=dem_arr.shape,
+                transform=dem_transform,
+                fill=0,
+                dtype="uint8",
+            )
+            valid = zone_raster > 0
+            dhdt_arr = (dhdt_raster.read(1, masked=True).astype("float32") * scale).filled(np.nan)
+            if dhdt_arr.shape != dem_arr.shape:
+                raise RuntimeError(f"Hypsometric raster shape mismatch for {config.interval_name}")
 
-            if np.count_nonzero(mask) == 0:
-                continue
-            entry = {}
-            for key in dhdt_arrs:
-                med = np.nanmedian(dhdt_arrs[key][mask])
-                entry["elevation"] = elev_bin_centers[idx - 1]
-                entry[f"{key}_med"] = med
-                entry[f"{key}_nmad"] = 1.4826 * np.nanmedian(np.abs(dhdt_arrs[key][mask] - med))
+        frame = pd.DataFrame(
+            {
+                "zone_label": [id_to_label[i] for i in zone_raster[valid]],
+                "elev_idx": np.digitize(dem_arr, elev_bins)[valid],
+                "dhdt": dhdt_arr[valid],
+            }
+        )
+        frame = frame[(frame["elev_idx"] >= 1) & (frame["elev_idx"] <= elev_bin_centers.shape[0])]
 
-            vals.append(entry)
-
-        per_zone[label] = pd.DataFrame.from_records(vals).set_index("elevation")
-
-
-    colors = {"2013-2018": DHDT_SM.to_rgba(1.), "2019-2024": DHDT_SM.to_rgba(-1)}
+        zone_results = {}
+        for label in zone_meta.index:
+            subset = frame[frame["zone_label"] == label]
+            vals = []
+            for idx in np.unique(subset["elev_idx"]):
+                vals_here = subset.loc[subset["elev_idx"] == idx, "dhdt"].to_numpy(dtype=float)
+                if vals_here.size == 0:
+                    continue
+                med = np.nanmedian(vals_here)
+                vals.append(
+                    {
+                        "elevation": elev_bin_centers[idx - 1],
+                        f"{config.short}_med": med,
+                        f"{config.short}_nmad": 1.4826 * np.nanmedian(np.abs(vals_here - med)),
+                    }
+                )
+            zone_results[label] = (
+                pd.DataFrame.from_records(vals).set_index("elevation")
+                if vals
+                else pd.DataFrame(columns=[f"{config.short}_med", f"{config.short}_nmad"]).set_index(pd.Index([], name="elevation"))
+            )
+        per_zone[config.short] = zone_results
 
     fig = plt.figure(figsize=(8, 4))
-    axes = fig.subplots(2, glacier_zones.shape[0] // 2, sharex=True, sharey=True)
-    for col, (label, zone) in enumerate(glacier_zones.iterrows()):
-        axis: plt.Axes = axes.ravel()[col]
-        for row, interval in enumerate(dhdt_arrs.keys()):
-
-            axis.set_title(str(zone["zone_name"]))
+    ncols = int(np.ceil(len(zone_meta) / 2))
+    axes = np.atleast_1d(fig.subplots(2, ncols, sharex=True, sharey=True)).ravel()
+    for col, (label, zone) in enumerate(zone_meta.iterrows()):
+        axis: plt.Axes = axes[col]
+        axis.set_title(str(zone["zone_name"]))
+        for config in intervals:
+            data = per_zone[config.short][label]
+            if data.empty:
+                continue
             axis.errorbar(
-                per_zone[label].index,
-                per_zone[label][f"{interval}_med"],
-                per_zone[label][f"{interval}_nmad"],
-                color=colors[interval], 
+                data.index,
+                data[f"{config.short}_med"],
+                data[f"{config.short}_nmad"],
+                color=config.color,
                 alpha=0.5,
                 fmt="none",
             )
             axis.scatter(
-                per_zone[label].index,
-                per_zone[label][f"{interval}_med"],
+                data.index,
+                data[f"{config.short}_med"],
                 marker="s",
                 edgecolor="#777",
-                color=colors[interval], 
-                label=interval,
+                color=config.color,
+                label=config.interval_name,
             )
 
         xlim = axis.get_xlim()
@@ -913,20 +824,21 @@ def hypsometric():
         if col in [0, 4]:
             axis.set_ylabel("dH / dt (m a$^{-1}$)")
 
-        if (col >= glacier_zones.shape[0] // 2):
+        if col >= ncols:
             axis.set_xlabel("Elevation (m a.s.l.)")
 
-        if (col + 1) == axes.size:
+        if (col + 1) == len(zone_meta):
             axis.legend(loc="lower right")
 
+    for axis in axes[len(zone_meta):]:
+        axis.set_visible(False)
 
     plt.ylim(-3, 0.8)
-
     plt.subplots_adjust(top=0.937, bottom=0.121, left=0.073, right=0.991, hspace=0.219, wspace=0.061)
-    # plt.xscale("log")
-
     plt.savefig("figures/perzone_hypsometric_signal.svg")
-    plt.show()
+
+    if show:
+        plt.show()
 
             
 

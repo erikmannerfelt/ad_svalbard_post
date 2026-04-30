@@ -183,10 +183,11 @@ def plot_terrain_err():
     plt.show()
 
 
-def plot_surge_nosurge_bar():
+def plot_surge_nosurge_bar(show: bool = True):
 
     outlines = gpd.read_file(CACHE_DIR / "outlines_sampled.arrow")
 
+    key_to_interval = lambda s: "_".join(s.split("_")[-2:])
     val_cols = ["slope_13_18", "slope_19_24"]
     titles = ["2013-2018", "2019-2024"]
 
@@ -257,7 +258,7 @@ def plot_surge_nosurge_bar():
         vol_col = val_col + "_loss"
         outlines[vol_col] = outlines.geometry.area * outlines[val_col] / 1e9
 
-        for surging, data in outlines.groupby("surging"):
+        for surging, data in outlines.groupby(f"surging_{key_to_interval(val_col)}"):
             data = _prepare_stack(data, vol_col)
             stack_vol = data["stack_vol"].to_numpy(dtype=float)
             strip = _stack_to_rgba_strip(
@@ -298,7 +299,7 @@ def plot_surge_nosurge_bar():
 
         ax.xaxis.set_ticks([0, 1], ["Nonsurging", "Surging"])
         ax.set_xlim(-0.5, 1.5)
-        ax.set_ylim(-22, 0)
+        ax.set_ylim(-23, 0)
         ax.axhline(0, color="#444", linewidth=0.6)
 
         if i == 0:
@@ -309,5 +310,6 @@ def plot_surge_nosurge_bar():
 
     
 
-    # plt.show()
+    if show:
+        plt.show()
     
