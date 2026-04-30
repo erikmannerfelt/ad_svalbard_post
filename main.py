@@ -11,6 +11,7 @@ import scipy.interpolate
 import base64, io
 import xml.etree.ElementTree as ET
 from PIL import Image
+import tqdm
 
 from record_information import record_information, format_float
 
@@ -35,6 +36,69 @@ DHDT_SM = matplotlib.cm.ScalarMappable(
     norm=DHDT_NORMALIZER,
     cmap=matplotlib.colors.LinearSegmentedColormap.from_list("dhdt", [(DHDT_NORMALIZER(a), b) for a, b in DHDT_COLORS]),
 )
+
+
+def surge_overlaps_interval(term_value, onset_value, min_year, max_year) -> bool:
+    """Return whether any surge episode overlaps an interval.
+
+    Episodes are encoded as semicolon-separated years. A termination value of
+    ``Ongoing`` or ``Not observed`` is treated as open-ended.
+
+    An episode overlaps an interval when it starts on or before ``max_year``
+    and ends after ``min_year``.
+
+    >>> surge_overlaps_interval("1998;2021", "1991;2017", 2013, 2018)
+    True
+    >>> surge_overlaps_interval("1998;2021", "1991;2017", 2019, 2024)
+    True
+    >>> surge_overlaps_interval("2014", "2011", 2019, 2024)
+    False
+    >>> surge_overlaps_interval("2014", "2011", 2013, 2018)
+    True
+    >>> surge_overlaps_interval("2025", "2025", 2013, 2024)
+    False
+    >>> surge_overlaps_interval("2013", "2011", 2013, 2024)
+    False
+    >>> surge_overlaps_interval("Not observed", "2003", 2019, 2024)
+    True
+    >>> surge_overlaps_interval("Not observed", "1990", 2019, 2024)
+    False
+    """
+
+    def _tokens(value):
+        if pd.isna(value):
+            return []
+        return [part.strip() for part in str(value).split(";") if part.strip()]
+
+    onset_tokens = _tokens(onset_value)
+    term_tokens = _tokens(term_value)
+
+    for idx, onset_token in enumerate(onset_tokens):
+        try:
+            onset_year = int(onset_token)
+        except ValueError:
+            continue
+
+        if onset_year > max_year:
+            continue
+
+        term_token = term_tokens[idx] if idx < len(term_tokens) else None
+        if term_token is None:
+            term_year = np.inf
+        else:
+            term_lower = term_token.lower()
+            if term_lower in {"", "n/a", "not observed", "ongoing"}:
+                term_year = np.inf
+            else:
+                try:
+                    term_year = int(term_token)
+                except ValueError:
+                    term_year = np.inf
+
+        if onset_year <= max_year and term_year > min_year:
+            return True
+
+    return False
 
 def make_coastline_intervals() -> gpd.GeoDataFrame:
     cache_path = CACHE_DIR / "coastline_intervals.arrow"
@@ -84,33 +148,65 @@ def make_coastline_intervals() -> gpd.GeoDataFrame:
 
 def make_outlines():
     coasts = make_coastline_intervals()
-    coasts["start_year"] = coasts["name"].str.split("-", expand=True).iloc[:, 0].astype(int)
-    coasts["end_year"] = coasts["name"].str.split("-", expand=True).iloc[:, 1].astype(int)
+    intervals = [
+        ("13_18", 2013, 2018),
+        ("19_24", 2019, 2024),
+        ("13_24", 2013, 2024),
+    ]
 
     # rgi7_orig = gpd.read_file("input/RGI2000-v7.0-G-07_svalbard_jan_mayen.zip").to_crs(CRS_EPSG)
-    rgi7_orig = gpd.read_file("zip:///home/erikmann/Projects/UiO/phd_thesis/data/RGI_V7_Surge_Database.zip/RGI_V7_Surge_Database/RGI2000-v7.0-G-07_svalbard_jan_mayen_Surge_Database.shp").to_crs(CRS_EPSG)
+    rgi7_orig = gpd.read_file("zip://input/RGI_V7_Surge_Database.zip/RGI_V7_Surge_Database/RGI2000-v7.0-G-07_svalbard_jan_mayen_Surge_Database.shp").to_crs(CRS_EPSG)
     rgi7_orig["geometry"] = rgi7_orig["geometry"].buffer(0)
-    rgi7_orig["modified"] = False
+
+    field_overrides = {
+        "RGI2000-v7.0-G-07-01379": {
+            "S_Onset": "2015",
+            "S_Term": "Ongoing",
+            "glac_name": "Austfonna Basin-7",
+        },
+        "RGI2000-v7.0-G-07-01383": {"glac_name": "Storisstraumen"},
+        "RGI2000-v7.0-G-07-01385": {"glac_name": "Austfonna Basin-2"},
+        "RGI2000-v7.0-G-07-01381": {"glac_name": "Austfonna Basin-5"},
+    }
+
+    for rgi_id, overrides in field_overrides.items():
+        idx = rgi7_orig[rgi7_orig["rgi_id"] == rgi_id].index
+        for key, value in overrides.items():
+            rgi7_orig.loc[idx, key] = value
 
     outline_corrections = gpd.read_file("shapes/outline_corrections.geojson")
     outline_corrections["is_extension"] = outline_corrections["fix_type"].str.contains("partition_override")
 
-    for key, coastline in coasts.iterrows():
+    out = rgi7_orig.drop(columns=["geometry"]).copy()
+    rgi_id_to_idx = rgi7_orig.reset_index().set_index("rgi_id")["index"].to_dict()
+
+    for key, min_year, max_year in tqdm.tqdm(intervals):
+        coastline = coasts.loc[key]
         rgi7 = rgi7_orig.copy()
-        for _, item in outline_corrections.sort_values(["is_extension", "priority"]).iterrows():
-            if any(
-                   [
-                       item["first_active_year"] > coastline["end_year"],
-                       item["last_active_year"] < coastline["start_year"],
-                    ]
-                ):
+        rgi7["modified"] = False
+        active_corrections = outline_corrections.loc[
+            ~(
+                (outline_corrections["first_active_year"] > max_year)
+                | (outline_corrections["last_active_year"] < min_year)
+            )
+        ].sort_values(["is_extension", "priority"])
+
+        for _, item in active_corrections.iterrows():
+            outline_idx = rgi_id_to_idx.get(item["rgi_id"])
+            if outline_idx is None:
                 continue
-            outline_idx = rgi7[rgi7["rgi_id"] == item["rgi_id"]].index.tolist()
+            outline_idx = [outline_idx]
 
             if len(outline_idx) != 1:
                 raise RuntimeError(f"Problematic correction. Matched none or too many indexes.\n{item}")
 
-            overlaps = rgi7["geometry"].overlaps(item["geometry"])
+            overlaps = pd.Series(False, index=rgi7.index)
+            try:
+                candidate_idx = rgi7.sindex.query(item["geometry"], predicate="intersects")
+                if len(candidate_idx):
+                    overlaps.loc[candidate_idx] = rgi7.loc[candidate_idx, "geometry"].overlaps(item["geometry"]).to_numpy()
+            except Exception:
+                overlaps = rgi7["geometry"].overlaps(item["geometry"])
         
             rgi7.loc[overlaps, "geometry"] = rgi7.loc[overlaps, "geometry"].difference(item["geometry"])
             rgi7.loc[outline_idx[0], "geometry"] = rgi7.loc[outline_idx[0], "geometry"].union(item["geometry"])
@@ -118,7 +214,15 @@ def make_outlines():
 
         rgi7["geometry"] = rgi7["geometry"].intersection(coastline["geometry"])
 
-        rgi7.to_feather(f"cache/rgi7_{key}.arrow")
+        out[f"geometry_{key}"] = gpd.GeoSeries(rgi7["geometry"].values, crs=CRS_EPSG)
+        out[f"modified_{key}"] = rgi7["modified"].values
+        out[f"surging_{key}"] = [
+            surge_overlaps_interval(term_value, onset_value, min_year, max_year)
+            for term_value, onset_value in zip(rgi7["S_Term"], rgi7["S_Onset"])
+        ]
+
+    out = gpd.GeoDataFrame(out, geometry="geometry_13_24", crs=CRS_EPSG)
+    out.to_feather(CACHE_DIR / "rgi7_outlines.arrow")
         
 
 def get_neff_model():
@@ -136,41 +240,24 @@ def sample_rasters(redo: bool = False) -> gpd.GeoDataFrame:
         return gpd.read_feather(cache_path)
     import rasterio
     import rasterio.features
-    name_overrides = {
-        "RGI2000-v7.0-G-07-01383": "Storisstraumen",
-        "RGI2000-v7.0-G-07-01385": "Austfonna Basin-2",
-        "RGI2000-v7.0-G-07-01379": "Austfonna Basin-7",
-        "RGI2000-v7.0-G-07-01381": "Austfonna Basin-5",
-
-    }
     neff_model = get_neff_model()
 
-    outlines = gpd.read_file("cache/rgi7_13_24.arrow")
+    outlines_path = CACHE_DIR / "rgi7_outlines.arrow"
+    if not outlines_path.is_file():
+        make_outlines()
+
+    outlines = gpd.read_feather(outlines_path)
     outlines["id"] = outlines["rgi_id"].str.split("-", expand=True).iloc[:, -1].astype(int)
     outlines = outlines[~outlines.geometry.is_empty]
 
-    outlines["glac_name"] = outlines.apply(lambda row: name_overrides.get(row["rgi_id"], row["glac_name"]), axis="columns")
 
     glacier_zones = gpd.read_file("shapes/glacier_zones.geojson").to_crs(outlines.crs).set_index("zone_label")
     outlines = gpd.sjoin(outlines, glacier_zones)
 
-    min_year = 2010
-    def is_surging(string):
-
-        results = [False]
-        for part in str(string).split(";"):
-            try:
-                year = int(part.strip())
-                results.append(year >= min_year)
-            except:
-                continue
-        return any(results)
-    outlines["surging"] = (outlines["S_Term"] + ";" + outlines["S_Onset"].str.replace("2024", "").str.replace("2025", "")).apply(is_surging)
-
     date = "20260424"
     data = {}
     with rasterio.open(f"input/trend_2013-2024_slope_{date}.tif") as raster:
-        rasterized = rasterio.features.rasterize([(outline["geometry"], outline["id"]) for _, outline in outlines.iterrows()], out_shape=(raster.height, raster.width), fill=0, transform=raster.transform)
+        rasterized = rasterio.features.rasterize([(geom, outline_id) for geom, outline_id in zip(outlines.geometry, outlines["id"])], out_shape=(raster.height, raster.width), fill=0, transform=raster.transform)
         periglacial = rasterized == 0
         rasterized = rasterized[~periglacial]
 
