@@ -82,7 +82,7 @@ def make_coastline_intervals() -> gpd.GeoDataFrame:
         
 
 
-def main():
+def make_outlines():
     coasts = make_coastline_intervals()
     coasts["start_year"] = coasts["name"].str.split("-", expand=True).iloc[:, 0].astype(int)
     coasts["end_year"] = coasts["name"].str.split("-", expand=True).iloc[:, 1].astype(int)
@@ -840,4 +840,4 @@ def hypsometric():
 
 
 if __name__ == "__main__":
-    main()
+    make_outlines()
