@@ -313,7 +313,7 @@ def sample_rasters(redo: bool = False) -> gpd.GeoDataFrame:
         outlines[f"area_{short}"] = np.nan
         outlines[f"neff_{short}"] = np.nan
 
-    for idx, outline in outlines.iterrows():
+    for idx, outline in tqdm.tqdm(outlines.iterrows()):
         for short, _, _, _ in intervals:
             mask = rasterized_by_short[short] == outline["id"]
             area = np.count_nonzero(mask) * res_by_short[short] ** 2
@@ -343,11 +343,17 @@ def sample_rasters(redo: bool = False) -> gpd.GeoDataFrame:
             outlines.loc[idx, "accel_13_24_positive_vol"] = outlines.loc[idx, "accel_13_24"] * outlines.loc[idx, "area_13_24"]
 
 
+    to_v_keys = ["slope_13_24", "slope_13_18", "slope_19_24", "accel_13_24"]
+    key_to_interval = lambda s: "_".join(s.split("_")[-2:])
+    for key in to_v_keys:
+        for suffix in ["", "_err", "_err_unscaled"]:
+            outlines[key + "_vol" + suffix] = outlines[key + suffix] * outlines[f"area_{key_to_interval(key)}"]
     outlines.to_feather(cache_path)
     return gpd.read_feather(cache_path)
 
 
-def plot_regional_dhdt_fig(all_changes, glacier_zones, show: bool = True):
+def plot_regional_dhdt_fig(all_changes, show: bool = True):
+    glacier_zones = refine_glacier_zones()
     all_params = [
         {
             "xcol": "slope_start_mid",
@@ -462,20 +468,14 @@ def plot_regional_dhdt_fig(all_changes, glacier_zones, show: bool = True):
             plt.show()
         plt.close()
 
-def get_dhdt():
 
-    outlines = sample_rasters()
+def refine_glacier_zones():
+    cache_path = CACHE_DIR / "refined_glacier_zones.arrow"
 
-    # Tinkarpbreen
-    outlines.loc[outlines["rgi_id"] == "RGI2000-v7.0-G-07-00560", ["surging_13_18", "surging_13_24", "surging_19_24"]] = True
+    if cache_path.is_file():
+        return gpd.read_feather(cache_path)
 
-    to_v_keys = ["slope_13_24", "slope_13_18", "slope_19_24", "accel_13_24"]
-    key_to_interval = lambda s: "_".join(s.split("_")[-2:])
-    for key in to_v_keys:
-        for suffix in ["", "_err", "_err_unscaled"]:
-            outlines[key + "_vol" + suffix] = outlines[key + suffix] * outlines[f"area_{key_to_interval(key)}"]
-        
-    glacier_zones = gpd.read_file("shapes/glacier_zones.geojson").to_crs(outlines.crs).set_index("zone_label")
+    glacier_zones = gpd.read_file("shapes/glacier_zones.geojson").set_index("zone_label")
 
     coasts = make_coastline_intervals().loc[["13_24"]].explode().to_crs(glacier_zones.crs)
     coasts = coasts[coasts.geometry.area > 1e8]
@@ -483,9 +483,24 @@ def get_dhdt():
 
     glacier_zones.geometry = glacier_zones.geometry.intersection(coasts.geometry[0])
 
+    glacier_zones.to_feather(cache_path)
+    return gpd.read_feather(cache_path)
+    
+
+def get_statistics():
+
+    outlines = sample_rasters()
+    to_v_keys = ["slope_13_24", "slope_13_18", "slope_19_24", "accel_13_24"]
+    key_to_interval = lambda s: "_".join(s.split("_")[-2:])
+
+    # Tinkarpbreen
+    outlines.loc[outlines["rgi_id"] == "RGI2000-v7.0-G-07-00560", ["surging_13_18", "surging_13_24", "surging_19_24"]] = True
+
+    glacier_zones = refine_glacier_zones()
+        
     neff_model = get_neff_model()
 
-    all_changes = {
+    changes_stats = {
             "units": {
                 "vol_rate": "km$^{3}$~a$^{-1}$",
                 "vol_accel": "km$^{3}$~a$^{-2}$",
@@ -497,7 +512,7 @@ def get_dhdt():
         }
 
 
-    all_changes["changes"] = {}
+    changes_stats["changes"] = {}
     for key in to_v_keys:
         interval = key_to_interval(key)
 
@@ -541,10 +556,17 @@ def get_dhdt():
                         changes[partition]["per_zone"] = {}
 
                     changes[partition]["per_zone"][zone_label] = new_changes
-        all_changes["changes"][key.replace("13", "start").replace("18", "mid").replace("19", "mid").replace("24", "end")] = changes
+        changes_stats["changes"][key.replace("13", "start").replace("18", "mid").replace("19", "mid").replace("24", "end")] = changes
 
 
-    record_information({"changes": all_changes})
+    all_stats = {"changes": changes_stats}
+    record_information(all_stats) # type: ignore
+    return all_stats
+
+
+def make_figs(show: bool = False):
+    changes_stats = get_statistics()["changes"]
+    outlines = sample_rasters()
     fig = plt.figure(figsize=(4, 3))
     for i, (issurging, items) in enumerate(outlines.groupby("surging_13_24")):
 
@@ -564,7 +586,7 @@ def get_dhdt():
     plt.close()
     
     
-    plot_regional_dhdt_fig(all_changes=all_changes, glacier_zones=glacier_zones, show=False)
+    plot_regional_dhdt_fig(all_changes=changes_stats, show=False)
     
     fig = plt.figure(figsize=(4, 3))
     axes: list[plt.Axes] = fig.subplots(2, 1, sharex=True, sharey=False).ravel().tolist() # type: ignore

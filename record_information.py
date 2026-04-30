@@ -2,6 +2,7 @@ import collections.abc
 import json
 
 from pathlib import Path
+INFO_PATH = (Path(__file__).absolute().parent / "tables/statistics.json").resolve()
 
 def format_float(number: float, decimals: int = 2) -> str:
     """
@@ -87,11 +88,10 @@ def format_values(obj: object, i: int = 0, max_i: int = 20) -> object:
 
 
 def record_information(new_info: dict[str, object] | None = None) -> dict[str, object]:
-    info_path = Path("tables/statistics.json")
-    info_tex_path = info_path.with_suffix(".tex")
+    info_tex_path = INFO_PATH.with_suffix(".tex")
 
-    if info_path.is_file():
-        with open(info_path) as infile:
+    if INFO_PATH.is_file():
+        with open(INFO_PATH) as infile:
             info = json.load(infile)
     else:
         info = {}
@@ -99,14 +99,14 @@ def record_information(new_info: dict[str, object] | None = None) -> dict[str, o
     if new_info is not None:
         info = rec_update_dict(info, new_info)
 
-        info_path.parent.mkdir(exist_ok=True, parents=True)
-        with open(info_path, "w") as outfile:
+        INFO_PATH.parent.mkdir(exist_ok=True, parents=True)
+        with open(INFO_PATH, "w") as outfile:
             json.dump(
                 format_values(info),
                 outfile,
                 indent=2,
             )
-        with open(info_path) as infile:
+        with open(INFO_PATH) as infile:
             info = json.load(infile)
 
         info_tex = rec_to_tex_macros(info)
