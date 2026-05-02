@@ -87,6 +87,12 @@ def read_aux_bytes(name: str) -> bytes:
     with zipfile.ZipFile(INPUT_DIR / "aux_files.zip") as zip_file:
         return zip_file.read(name)
 
+def read_aux_text(name: str) -> str:
+    return read_aux_bytes(name).decode()
+
 
 def read_aux_csv(name: str, **kwargs) -> pd.DataFrame:
     return pd.read_csv(io.BytesIO(read_aux_bytes(name)), **kwargs)
+
+def read_aux_zip(name: str) -> zipfile.ZipFile:
+    return zipfile.ZipFile(io.BytesIO(read_aux_bytes(name)))

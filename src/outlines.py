@@ -85,11 +85,11 @@ def make_coastline_intervals() -> gpd.GeoDataFrame:
     return gpd.read_feather(cache_path).set_index("key")  # type: ignore
 
 
-def make_outlines():
+def make_outlines(redo: bool = False):
     cache_path = CACHE_DIR / "rgi7_outlines.arrow"
     intervals = tools.iter_intervals()
 
-    if cache_path.is_file():
+    if cache_path.is_file() and not redo:
         out = gpd.read_feather(cache_path)
         for interval in intervals:
             out[interval.area_col] = out[interval.geometry_col].area
@@ -101,11 +101,17 @@ def make_outlines():
     rgi7_orig["geometry"] = rgi7_orig["geometry"].buffer(0)
 
     field_overrides = {
+        "RGI2000-v7.0-G-07-01312": {"glac_name": "Lilliehöökbreen"},
         "RGI2000-v7.0-G-07-01379": {"S_Onset": "2015", "S_Term": "Ongoing", "glac_name": "Austfonna Basin-7"},
         "RGI2000-v7.0-G-07-01383": {"glac_name": "Storisstraumen"},
         "RGI2000-v7.0-G-07-01385": {"glac_name": "Austfonna Basin-2"},
         "RGI2000-v7.0-G-07-01381": {"glac_name": "Austfonna Basin-5"},
+        "RGI2000-v7.0-G-07-01384": {"glac_name": "Bråsvellbreen"},
         "RGI2000-v7.0-G-07-00560": {"S_Onset": "2012", "S_Term": "Ongoing"},
+        "RGI2000-v7.0-G-07-00888": {"S_Onset": "2016", "S_Term": "2019"},  # Sveitsarfonna mirroring Penckbreen
+        "RGI2000-v7.0-G-07-00899": {"S_Onset": "1890; 2008", "S_Term": "1890; 2017"},  # Zawadzkibreen mirroring Nathorstbreen
+        "RGI2000-v7.0-G-07-00902": {"S_Onset": "1890; 2008", "S_Term": "1890; 2017"},  # Polakkbreen mirroring Nathorstbreen
+        "RGI2000-v7.0-G-07-00912": {"S_Onset": "1890; 2008", "S_Term": "1890; 2017"},  # Dobrowolskibreen mirroring Nathorstbreen
     }
     for rgi_id, overrides in field_overrides.items():
         idx = rgi7_orig[rgi7_orig["rgi_id"] == rgi_id].index
@@ -150,6 +156,8 @@ def make_outlines():
         outlines_df[interval.surging_col] = [surge_overlaps_interval(term_value, onset_value, interval.start_year, interval.end_year) for term_value, onset_value in zip(rgi7["S_Term"], rgi7["S_Onset"])]
 
     outlines_df = gpd.GeoDataFrame(outlines_df, geometry=tools.get_interval("13_24").geometry_col, crs=CRS_EPSG)
+    glacier_zones = gpd.read_file("shapes/glacier_zones.geojson").to_crs(outlines_df.crs).set_index("zone_label")
+    outlines_df = gpd.sjoin(outlines_df, glacier_zones, how="left", predicate="intersects").reset_index(drop=True)
     for interval in intervals:
         outlines_df[interval.area_col] = outlines_df[interval.geometry_col].area
 

@@ -6,7 +6,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from . import outlines, reporting, sampling, tools
+from . import coreg, outlines, reporting, sampling, tools
+
+
+def _histogram_mode(values: pd.Series | np.ndarray, bins: np.ndarray) -> float:
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return float("nan")
+    counts, edges = np.histogram(arr, bins=bins)
+    idx = int(np.argmax(counts))
+    return float((edges[idx] + edges[idx + 1]) / 2)
 
 
 def get_statistics():
@@ -24,10 +34,32 @@ def get_statistics():
             "vol_accel": "km$^{3}$~a$^{-2}$",
             "elev_rate": "m~a$^{-1}$",
         },
-        "parameters": {"positive_change_threshold": 0.1},
+        "parameters": {"positive_change_threshold": 0.1, "vertcoreg_min_comparisons": coreg.VERTCOREG_MIN_COMPARISONS},
     }
 
     all_stats["changes"] = {}
+    rigidcoreg = coreg.read_rigidcoreg_results()
+    vertcoreg = coreg.read_vertcoreg_results()
+    vertcoreg_meta = coreg.read_vertcoreg_meta().copy()
+    vertcoreg_meta["support_percent"] = vertcoreg_meta["n_stable_points"] / vertcoreg_meta["n_points"] * 100
+
+    all_stats["coregistration"] = {
+        "counts": coreg.get_coregistration_counts(),
+        "rigidcoreg": {
+            "stable_terrain_percent_median": float((rigidcoreg["stable_fraction"] * 100).median()),
+            "stable_nmad_median": float(rigidcoreg["stable_nmad"].median()),
+            "icp_slope_m_per_km_median": float(rigidcoreg["icp_slope_m_per_km"].median()),
+            "icp_slope_m_per_km_mode": _histogram_mode(rigidcoreg["icp_slope_m_per_km"], np.linspace(0, 0.8, 150)),
+            "horizontal_shift_m_median": float(rigidcoreg["rigidcoreg_horizontal_shift_m"].median()),
+        },
+        "vertcoreg": {
+            "ramp_m_per_km_median": float(vertcoreg["ramp_m_per_km"].median()),
+            "ramp_m_per_km_mode": _histogram_mode(vertcoreg["ramp_m_per_km"], np.linspace(0, 0.3, 60)),
+            "stable_terrain_percent_mean": float(vertcoreg_meta["support_percent"].mean()),
+            "between_pair_nmad_pre_mean": float(vertcoreg_meta["nmad_pre"].mean()),
+            "between_pair_nmad_post_mean": float(vertcoreg_meta["nmad_post"].mean()),
+        },
+    }
 
     for key in to_v_keys:
         interval = "_".join(key.split("_")[-2:])
@@ -89,6 +121,7 @@ def compute_hypsometric_profiles():
 
     sampled = sampling.sample_rasters()
     zone_meta = sampled[["zone_label", "zone_name"]].drop_duplicates().set_index("zone_label")
+    zone_meta = zone_meta.loc[zone_meta.index.notna() & zone_meta["zone_name"].notna()]
     zone_ids = {label: i + 1 for i, label in enumerate(zone_meta.index)}
     id_to_label = {i: label for label, i in zone_ids.items()}
 
@@ -117,7 +150,7 @@ def compute_hypsometric_profiles():
     per_zone = {}
     for config in intervals:
         geom_col = config.interval.geometry_col
-        nonsurging = sampled.loc[~sampled[config.interval.surging_col] & sampled[geom_col].notna()].copy()
+        nonsurging = sampled.loc[~sampled[config.interval.surging_col] & sampled[geom_col].notna() & sampled["zone_label"].notna()].copy()
         nonsurging = nonsurging[~nonsurging[geom_col].is_empty]
 
         with rio.open(config.filepath) as dhdt_raster_full:

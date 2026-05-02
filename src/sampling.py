@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import warnings
 
 import geopandas as gpd
 import numpy as np
@@ -19,6 +20,16 @@ def get_neff_model():
     return lambda a: model(np.clip(a, a_min=0, a_max=1.2e8))
 
 
+def _nanmean_or_warn(values: np.ndarray, *, rgi_id: str, glac_name: str, interval_short: str, key: str) -> float:
+    if values.size == 0:
+        warnings.warn(f"Missing sampled values for {rgi_id} ({glac_name}) in {interval_short} for {key}; storing NaN.", RuntimeWarning, stacklevel=2)
+        return float("nan")
+    if np.isnan(values).all():
+        warnings.warn(f"All sampled values are NaN for {rgi_id} ({glac_name}) in {interval_short} for {key}; storing NaN.", RuntimeWarning, stacklevel=2)
+        return float("nan")
+    return float(np.nanmean(values))
+
+
 def sample_rasters(redo: bool = False) -> gpd.GeoDataFrame:
     cache_path = CACHE_DIR / "outlines_sampled.arrow"
 
@@ -31,10 +42,8 @@ def sample_rasters(redo: bool = False) -> gpd.GeoDataFrame:
 
     neff_model = get_neff_model()
 
-    outlines_df=  outlines.make_outlines()
+    outlines_df = outlines.make_outlines()
     outlines_df["id"] = outlines_df["rgi_id"].str.split("-", expand=True).iloc[:, -1].astype(int)
-    glacier_zones = gpd.read_file("shapes/glacier_zones.geojson").to_crs(outlines_df.crs).set_index("zone_label")
-    outlines_df = gpd.sjoin(outlines_df, glacier_zones).reset_index(drop=True)
 
     date = "20260424"
     interval_raster_kinds = [
@@ -94,13 +103,28 @@ def sample_rasters(redo: bool = False) -> gpd.GeoDataFrame:
             outlines_df.loc[idx, f"neff_{interval.short}"] = neff_model(area)
 
             for key, arr in data_by_short[interval.short].items():
+                values = arr[mask]
                 if "temporal_err" in key:
-                    outlines_df.loc[idx, key] = np.nanmean(np.sqrt(np.clip((arr[mask] ** 2) - (data_by_short[interval.short][key.replace("temporal_err", "spatial_err_unscaled")][mask] ** 2), a_min=0, a_max=np.inf)))
+                    spatial_values = data_by_short[interval.short][key.replace("temporal_err", "spatial_err_unscaled")][mask]
+                    temporal_values = np.sqrt(np.clip((values ** 2) - (spatial_values ** 2), a_min=0, a_max=np.inf))
+                    outlines_df.loc[idx, key] = _nanmean_or_warn(
+                        temporal_values,
+                        rgi_id=outline["rgi_id"],
+                        glac_name=outline.get("glac_name", ""),
+                        interval_short=interval.short,
+                        key=key,
+                    )
                 else:
-                    outlines_df.loc[idx, key] = np.nanmean(arr[mask])
+                    outlines_df.loc[idx, key] = _nanmean_or_warn(
+                        values,
+                        rgi_id=outline["rgi_id"],
+                        glac_name=outline.get("glac_name", ""),
+                        interval_short=interval.short,
+                        key=key,
+                    )
                 if "slope" in key and "_err" not in key:
-                    outlines_df.loc[idx, f"{key}_positive_vol"] = np.nansum(arr[mask][arr[mask] > 0.]) * res_by_short[interval.short] ** 2
-                    outlines_df.loc[idx, f"{key}_positive_area"] = np.count_nonzero(arr[mask] > 0.1) * res_by_short[interval.short] ** 2
+                    outlines_df.loc[idx, f"{key}_positive_vol"] = np.nansum(values[values > 0.]) * res_by_short[interval.short] ** 2
+                    outlines_df.loc[idx, f"{key}_positive_area"] = np.count_nonzero(values > 0.1) * res_by_short[interval.short] ** 2
 
     for key in base_keys:
         outlines_df[[f"{key}_spatial_err_unscaled", f"{key}_temporal_err"]] *= 2
