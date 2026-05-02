@@ -1,0 +1,156 @@
+from __future__ import annotations
+
+import dataclasses
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+from . import outlines, reporting, sampling, tools
+
+
+def get_statistics():
+    sampled = sampling.sample_rasters()
+    to_v_keys = ["slope_13_24", "slope_13_18", "slope_19_24", "accel_13_24"]
+    intervals = tools.iter_intervals()
+    sampled.loc[sampled["rgi_id"] == "RGI2000-v7.0-G-07-00560", [i.surging_col for i in intervals]] = True
+
+    glacier_zones = outlines.refine_glacier_zones()
+    neff_model = sampling.get_neff_model()
+
+    all_stats = {
+        "units": {
+            "vol_rate": "km$^{3}$~a$^{-1}$",
+            "vol_accel": "km$^{3}$~a$^{-2}$",
+            "elev_rate": "m~a$^{-1}$",
+        },
+        "parameters": {"positive_change_threshold": 0.1},
+    }
+
+    all_stats["changes"] = {}
+
+    for key in to_v_keys:
+        interval = "_".join(key.split("_")[-2:])
+        vol_col = key + "_vol"
+        changes = {}
+
+        for partition, query in [("all", ""), ("surging", f"surging_{interval}"), ("nonsurging", f"~surging_{interval}")]:
+            for zone_label in ["allzones", *glacier_zones.index]:
+                subset = sampled if partition == "all" else sampled.query(query)
+                if zone_label != "allzones":
+                    subset = subset.query(f"zone_label == '{zone_label}'")
+
+                total_area = np.max([subset[f"area_{interval}"].sum(), 1e-5])
+                vol_rate = subset[vol_col].sum()
+                vol_rate_err = max(subset[vol_col + "_spatial_err_unscaled"].sum() / (neff_model(total_area) ** 0.5), subset[vol_col + "_temporal_err"].sum())
+
+                new_changes = {
+                    "vol_rate": vol_rate / 1e9,
+                    "vol_rate_err": vol_rate_err / 1e9,
+                    "area": total_area / 1e6,
+                    "elev_rate": vol_rate / total_area,
+                    "elev_rate_err": vol_rate_err / total_area,
+                }
+                if "accel" not in key:
+                    new_changes["positive_vol"] = subset[f"{key}_positive_vol"].sum() / 1e9
+                    new_changes["positive_area"] = subset[f"{key}_positive_area"].sum() / 1e6
+                    new_changes["positive_area_frac"] = round(100 * new_changes["positive_area"] / new_changes["area"])
+
+                if partition != "all" or zone_label != "allzones":
+                    denom = "all" if zone_label == "allzones" else partition
+                    new_changes["vol_rate_percent"] = round(100 * new_changes["vol_rate"] / changes[denom]["vol_rate"])
+                    new_changes["area_percent"] = round(100 * new_changes["area"] / changes[denom]["area"])
+
+                if zone_label == "allzones":
+                    changes[partition] = new_changes
+                else:
+                    if "per_zone" not in changes[partition]:
+                        changes[partition]["per_zone"] = {}
+                    changes[partition]["per_zone"][zone_label] = new_changes
+
+        if key == "slope_13_24":
+            stats_key = "slope_start_end"
+        elif key == "slope_13_18":
+            stats_key = "slope_start_mid"
+        elif key == "slope_19_24":
+            stats_key = "slope_mid_end"
+        else:
+            stats_key = "accel_start_end"
+
+        all_stats["changes"][stats_key] = changes
+
+    reporting.write_statistics_outputs(all_stats)
+    return all_stats
+
+
+def compute_hypsometric_profiles():
+    import rasterio as rio
+    import rasterio.features
+
+    sampled = sampling.sample_rasters()
+    zone_meta = sampled[["zone_label", "zone_name"]].drop_duplicates().set_index("zone_label")
+    zone_ids = {label: i + 1 for i, label in enumerate(zone_meta.index)}
+    id_to_label = {i: label for label, i in zone_ids.items()}
+
+    elev_bins = np.linspace(-0.01, 1200.01, 11)
+    elev_bin_centers = (elev_bins[1:] + elev_bins[:-1]) / 2
+
+    @dataclasses.dataclass
+    class Config:
+        interval: tools.Interval
+        filepath: str
+
+    interval_map = {i.short: i for i in tools.iter_intervals()}
+    intervals = [
+        Config(interval_map["13_18"], "input/trend_2013-2018_slope.tif"),
+        Config(interval_map["19_24"], "input/trend_2019-2024_slope.tif"),
+    ]
+
+    intercept_path = "input/trend_2013-2024_intercept.tif"
+    with rio.open(intercept_path) as dem_raster_full:
+        scale = dem_raster_full.scales[0]
+
+    with rio.open(intercept_path, overview_level=3) as dem_raster:
+        dem_arr = (dem_raster.read(1, masked=True).astype("float32") * scale).filled(0)
+        dem_transform = dem_raster.transform
+
+    per_zone = {}
+    for config in intervals:
+        geom_col = config.interval.geometry_col
+        nonsurging = sampled.loc[~sampled[config.interval.surging_col] & sampled[geom_col].notna()].copy()
+        nonsurging = nonsurging[~nonsurging[geom_col].is_empty]
+
+        with rio.open(config.filepath) as dhdt_raster_full:
+            scale = dhdt_raster_full.scales[0]
+
+        with rio.open(config.filepath, overview_level=3) as dhdt_raster:
+            zone_raster = rasterio.features.rasterize(
+                [(geom, zone_ids[label]) for geom, label in zip(nonsurging[geom_col], nonsurging["zone_label"])],
+                out_shape=dem_arr.shape,
+                transform=dem_transform,
+                fill=0,
+                dtype="uint8",
+            )
+            valid = zone_raster > 0
+            dhdt_arr = (dhdt_raster.read(1, masked=True).astype("float32") * scale).filled(np.nan)
+            if dhdt_arr.shape != dem_arr.shape:
+                raise RuntimeError(f"Hypsometric raster shape mismatch for {config.interval.display_label}")
+
+        frame = pd.DataFrame({"zone_label": [id_to_label[i] for i in zone_raster[valid]], "elev_idx": np.digitize(dem_arr, elev_bins)[valid], "dhdt": dhdt_arr[valid]})
+        frame = frame[(frame["elev_idx"] >= 1) & (frame["elev_idx"] <= elev_bin_centers.shape[0])]
+
+        zone_results = {}
+        for label in zone_meta.index:
+            subset = frame[frame["zone_label"] == label]
+            vals = []
+            for idx in np.unique(subset["elev_idx"]):
+                vals_here = subset.loc[subset["elev_idx"] == idx, "dhdt"].to_numpy(dtype=float)
+                if vals_here.size == 0:
+                    continue
+                med = np.nanmedian(vals_here)
+                vals.append({"elevation": elev_bin_centers[idx - 1], f"{config.interval.short}_med": med, f"{config.interval.short}_nmad": 1.4826 * np.nanmedian(np.abs(vals_here - med))})
+
+            zone_results[label] = pd.DataFrame.from_records(vals).set_index("elevation") if vals else pd.DataFrame(columns=[f"{config.interval.short}_med", f"{config.interval.short}_nmad"]).set_index(pd.Index([], name="elevation"))
+        per_zone[config.interval.short] = zone_results
+
+    return {"zone_meta": zone_meta, "per_zone": per_zone, "intervals": intervals, "elev_bins": elev_bins, "elev_bin_centers": elev_bin_centers}
