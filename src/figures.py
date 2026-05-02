@@ -37,14 +37,30 @@ def plot_terrain_err():
     with zipfile.ZipFile(INPUT_DIR / "aux_files.zip") as zip_file:
         data = pd.read_csv(io.BytesIO(zip_file.read("binned_terrain_err_trend_2019-2024_slope.csv")), index_col=0)
     data["count"] = data["count"].astype(int)
+    xcol = "terr_slope"
+    ycol = "terr_curvature"
 
     for col in ["terr_slope", "terr_curvature", "easting", "northing"]:
         data[col] = data[col].apply(_pandas_str_to_interval)
 
-    data["e_mid"] = pd.IntervalIndex(data["easting"]).mid
-    data["n_mid"] = pd.IntervalIndex(data["northing"]).mid
-    e_cols = data["e_mid"].dropna().unique()[[0, -1]]
-    n_cols = data["n_mid"].dropna().unique()[[0, -1]]
+    # Merge the four east/north bins into a 2x2 grid for plotting.
+    e_bins = pd.IntervalIndex(sorted(data["easting"].dropna().unique()))
+    n_bins = pd.IntervalIndex(sorted(data["northing"].dropna().unique()))
+    e_merged = [pd.Interval(e_bins[0].left, e_bins[1].right, closed=e_bins[0].closed), pd.Interval(e_bins[2].left, e_bins[3].right, closed=e_bins[2].closed)]
+    n_merged = [pd.Interval(n_bins[0].left, n_bins[1].right, closed=n_bins[0].closed), pd.Interval(n_bins[2].left, n_bins[3].right, closed=n_bins[2].closed)]
+    data["easting_merged"] = data["easting"].map({e_bins[0]: e_merged[0], e_bins[1]: e_merged[0], e_bins[2]: e_merged[1], e_bins[3]: e_merged[1]})
+    data["northing_merged"] = data["northing"].map({n_bins[0]: n_merged[0], n_bins[1]: n_merged[0], n_bins[2]: n_merged[1], n_bins[3]: n_merged[1]})
+
+    # Keep NMAD as a count-weighted average while summing the sample counts.
+    data["_nmad_weighted"] = data["nmad"] * data["count"]
+    data = data.groupby(["easting_merged", "northing_merged", xcol, ycol], as_index=False).agg(nd=("nd", "first"), count=("count", "sum"), _nmad_weighted=("_nmad_weighted", "sum"))
+    data["nmad"] = data["_nmad_weighted"] / data["count"]
+    data = data.drop(columns=["_nmad_weighted"])
+
+    data["e_mid"] = pd.IntervalIndex(data["easting_merged"]).mid
+    data["n_mid"] = pd.IntervalIndex(data["northing_merged"]).mid
+    e_cols = np.sort(data["e_mid"].dropna().unique())
+    n_cols = np.sort(data["n_mid"].dropna().unique())
 
     data = data[
             np.logical_and.reduce(
@@ -52,21 +68,16 @@ def plot_terrain_err():
                     data.nd == 4,
                     np.isfinite(pd.IntervalIndex(data["terr_slope"]).mid),
                     np.isfinite(pd.IntervalIndex(data["terr_curvature"]).mid),
-                    np.isin(data["e_mid"], e_cols),
-                    np.isin(data["n_mid"], n_cols),
                 )
             )
         ]
 
-    xcol = "terr_slope"
-    ycol = "terr_curvature"
     sm = matplotlib.cm.ScalarMappable(
         # norm=matplotlib.colors.Normalize(*np.nanpercentile(np.log10(np.clip(data["nmad"].values, a_min=1e-3, a_max=np.inf)), [1, 99])),
         norm=matplotlib.colors.Normalize(-1.3, -0.6),
         cmap="cividis",
     )
     edge_to_percentile = {}
-    percentile_to_edge = {}
     ticks = {}
     tick_labels = {}
     for col in [xcol, ycol]:
@@ -76,29 +87,29 @@ def plot_terrain_err():
         ])
         percentiles = np.linspace(0, 100, edges.size)
         edge_to_percentile[col] = scipy.interpolate.interp1d(edges, percentiles) 
-        percentile_to_edge[col] = scipy.interpolate.interp1d(percentiles, edges) 
 
         ticks[col] = percentiles
         tick_labels[col] = [f"{0 if edge < 1e-2 else edge:.2g}" for edge in edges]
 
     max_top_count = 0
     max_right_count = 0
-    for _, e_mid in enumerate(e_cols):
-        sub0 = data[data["e_mid"] == e_mid]
-        for _, n_mid in enumerate(n_cols):
-            subset = sub0[sub0["n_mid"] == n_mid]
+    for n_mid in n_cols[::-1]:
+        sub0 = data[data["n_mid"] == n_mid]
+        for e_mid in e_cols:
+            subset = sub0[sub0["e_mid"] == e_mid]
             top_max = subset.groupby(xcol, sort=False)["count"].sum().max()
             right_max = subset.groupby(ycol, sort=False)["count"].sum().max()
             max_top_count = max(max_top_count, 0 if pd.isna(top_max) else top_max)
             max_right_count = max(max_right_count, 0 if pd.isna(right_max) else right_max)
 
     fig = plt.figure()
-    outer = fig.add_gridspec(e_cols.shape[0], n_cols.shape[0], wspace=0.25, hspace=0.25)
+    # Put northing on rows (top to bottom: north to south) and easting on columns.
+    outer = fig.add_gridspec(n_cols.shape[0], e_cols.shape[0], wspace=0.25, hspace=0.25)
 
-    for i, e_mid in enumerate(e_cols):
-        sub0 = data[data["e_mid"] == e_mid]
-        for j, n_mid in enumerate(n_cols):
-            subset = sub0[sub0["n_mid"] == n_mid]
+    for i, n_mid in enumerate(n_cols[::-1]):
+        sub0 = data[data["n_mid"] == n_mid]
+        for j, e_mid in enumerate(e_cols):
+            subset = sub0[sub0["e_mid"] == e_mid]
             panel = outer[i, j].subgridspec(2, 2, height_ratios=[1, 4], width_ratios=[4, 1], wspace=0.05, hspace=0.05)
             ax_top: plt.Axes = fig.add_subplot(panel[0, 0])
             ax: plt.Axes = fig.add_subplot(panel[1, 0], sharex=ax_top)
@@ -148,7 +159,7 @@ def plot_terrain_err():
                 axis.set_ticks(ticks[col], tick_labels[col], fontsize=8)
                 axis._set_lim(0, 100, auto=False)
 
-            if i == 1:
+            if i == n_cols.shape[0] - 1:
                 ax.set_xlabel("Slope (°)")
             if j == 0:
                 ax.set_ylabel("Curvature (100/m)")
@@ -157,6 +168,10 @@ def plot_terrain_err():
             ax_right.set_ylim(0, 100)
             ax_top.set_ylim(0, max_top_count)
             ax_right.set_xlim(0, max_right_count)
+
+            quad_label = ("N" if i == 0 else "S") + ("W" if j == 0 else "E")
+            ax_top.text(0.02, 0.95, quad_label, transform=ax_top.transAxes, ha="left", va="top", fontsize=8, fontweight="bold")
+
             ax_top.tick_params(axis="x", labelbottom=False)
             ax_top.tick_params(axis="y", left=False, labelleft=False)
             ax_right.tick_params(axis="x", bottom=False, labelbottom=False)
@@ -167,10 +182,9 @@ def plot_terrain_err():
             ax_right.spines["top"].set_visible(False)
             ax_right.spines["right"].set_visible(False)
 
-    cax = fig.add_axes((0.42, 0.51, 0.15, 0.025))
+    cax = fig.add_axes((0.43, 0.53, 0.14, 0.025))
     cbar = fig.colorbar(sm, cax=cax, orientation="horizontal")
     cbar.set_label("NMAD (m a$^{-1}$)", fontsize=8)
-    ticks = [-2, -(2 + 0.6) / 2,  -0.6]
     ticks = np.linspace(sm.norm.vmin, sm.norm.vmax, 3)
     cbar.set_ticks(ticks, labels=[f"{10**tick:.1g}" for tick in ticks])
 
