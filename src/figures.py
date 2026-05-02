@@ -2,6 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.cm
 import matplotlib.colors
+import matplotlib.ticker
 import zipfile
 import io
 import numpy as np
@@ -34,7 +35,7 @@ def _pandas_str_to_interval(istr: str) -> float | pd.Interval:
 
 def plot_terrain_err():
     with zipfile.ZipFile(INPUT_DIR / "aux_files.zip") as zip_file:
-        data = pd.read_csv(io.BytesIO(zip_file.read("binned_terrain_err_trend_2013-2024_slope.csv")), index_col=0)
+        data = pd.read_csv(io.BytesIO(zip_file.read("binned_terrain_err_trend_2019-2024_slope.csv")), index_col=0)
     data["count"] = data["count"].astype(int)
 
     for col in ["terr_slope", "terr_curvature", "easting", "northing"]:
@@ -60,7 +61,8 @@ def plot_terrain_err():
     xcol = "terr_slope"
     ycol = "terr_curvature"
     sm = matplotlib.cm.ScalarMappable(
-        norm=matplotlib.colors.Normalize(*np.nanpercentile((data["nmad"].values), [1, 99])),
+        # norm=matplotlib.colors.Normalize(*np.nanpercentile(np.log10(np.clip(data["nmad"].values, a_min=1e-3, a_max=np.inf)), [1, 99])),
+        norm=matplotlib.colors.Normalize(-1.3, -0.6),
         cmap="cividis",
     )
     edge_to_percentile = {}
@@ -136,7 +138,7 @@ def plot_terrain_err():
                     (edge_to_percentile[xcol](row[xcol].left), edge_to_percentile[ycol](row[ycol].left)),
                     width=edge_to_percentile[xcol](row[xcol].right) - edge_to_percentile[xcol](row[xcol].left),
                     height=edge_to_percentile[ycol](row[ycol].right) - edge_to_percentile[ycol](row[ycol].left),
-                    facecolor=sm.to_rgba((row["nmad"])),
+                    facecolor=sm.to_rgba(np.log10(np.clip(row["nmad"], a_min=1e-3, a_max=np.inf))),
                     
                     edgecolor="#777",
                     linewidth=1,
@@ -168,6 +170,9 @@ def plot_terrain_err():
     cax = fig.add_axes((0.42, 0.51, 0.15, 0.025))
     cbar = fig.colorbar(sm, cax=cax, orientation="horizontal")
     cbar.set_label("NMAD (m a$^{-1}$)", fontsize=8)
+    ticks = [-2, -(2 + 0.6) / 2,  -0.6]
+    ticks = np.linspace(sm.norm.vmin, sm.norm.vmax, 3)
+    cbar.set_ticks(ticks, labels=[f"{10**tick:.1g}" for tick in ticks])
 
 
     fig.subplots_adjust(top=0.995,
@@ -315,29 +320,44 @@ def plot_surge_nosurge_bar(show: bool = True):
 
 
 def plot_patch_method_vs_vgm():
-    with zipfile.ZipFile(INPUT_DIR / "aux_files.zip") as zip_file:
-        d = pd.read_csv(io.BytesIO(zip_file.read("patch_method_trend_2013-2024_slope.csv")))
 
+    intervals = [
+        ("13_18", "2013-2018"),
+        ("19_24", "2019-2024"),
+        ("13_24", "2013-2024"),
+    ]
+    short, long = intervals[0]
     rgi = gpd.read_feather("cache/outlines_sampled.arrow")
 
-    fig = plt.figure(figsize=(8, 4))
-    axes = fig.subplots(1, 3)
-    for i, (col, name) in enumerate([("slope_19_24_temporal_err", "Temporal"), ("slope_19_24_spatial_err", "Spatial"),("slope_19_24_err", "Combined")]):
-        ax: plt.Axes = axes.ravel()[i]
+    fig = plt.figure(figsize=(8, 5))
+    axes = fig.subplots(len(intervals), 3, sharex=True, sharey=True)
+    for i, (short, long) in enumerate(intervals):
+        with zipfile.ZipFile(INPUT_DIR / "aux_files.zip") as zip_file:
+            patch = pd.read_csv(io.BytesIO(zip_file.read(f"patch_method_trend_{long}_slope.csv")))
+        for j, (col, name) in enumerate([(f"slope_{short}_spatial_err", r"$\sigma_{baseline}$ " + long),(f"slope_{short}_temporal_err", r"$\sigma_{excess}$ " + long),(f"slope_{short}_err", f"Total {long}")]):
+            ax: plt.Axes = axes[i, j]
 
-        ax.set_title(name)
-        ax.scatter(d["exact_areas"] / 1e6, d["nmad"] * 2, marker="x", c="k", zorder=2, label="Patch method")
-        ax.scatter(rgi["area_km2"], rgi[col], alpha=0.3, edgecolor="none", label="Individual glaciers")
-        ax.set_xscale("log")
-        ax.set_xlim(0.04, 1300)
-        ax.set_ylim(0, 0.6)
-        if i == 0:
-            ax.set_ylabel("Uncertainty (m; 2x NMAD)")
-        if i == 1:
-            ax.legend()
+            ax.set_title(name)
+            ax.scatter(patch["exact_areas"] / 1e6, patch["nmad"] * 2, marker="x", c="k", zorder=2, label="Patch method")
+            surging = rgi.query(f"surging_{short}")
+            nonsurging = rgi.query(f"~surging_{short}")
+            ax.scatter(nonsurging["area_km2"], nonsurging[col], alpha=0.4, edgecolor="none",s=20, label="Nonsurging")
+            ax.scatter(surging["area_km2"], surging[col], alpha=0.4, edgecolor="none",s=20, label="Surging")
+            ax.set_xscale("log")
+            ax.set_yscale("log")
+            ax.yaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
 
-        ax.set_xlabel("Area (km²)")
-    fig.tight_layout()
+            ax.set_xlim(0.03, 1500)
+            ax.set_ylim(5e-3, 1.7)
+            if j == 0:
+                if i == 1:
+                    ax.set_ylabel("Uncertainty (m)")
+                if i == (len(intervals) - 1):
+                    ax.legend(fontsize=8)
+
+            if i == (len(intervals) - 1):
+                ax.set_xlabel("Area (km²)")
+    fig.tight_layout(h_pad=0.1)
     fig.savefig("figures/patch_method_vs_vgm.svg")
     plt.show()
 

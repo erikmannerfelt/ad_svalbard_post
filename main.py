@@ -290,8 +290,9 @@ def sample_rasters(redo: bool = False) -> gpd.GeoDataFrame:
         paths = {
             base_key: Path(f"input/trend_{long}_{kind}_{date}.tif"),
         }
+        # paths[base_key + "_spatial_err_unscaled"] = paths[base_key + "_temporal_err"].with_stem(paths[base_key + "_temporal_err"].stem.replace("temporal", "spatial").replace("_tcorr", ""))
+        paths[base_key + "_spatial_err_unscaled"] = paths[base_key].parent / f"trend_{long}_{kind.replace('_tcorr', '')}_spatial_err.tif"
         paths[base_key + "_temporal_err"] = paths[base_key].parent / f"trend_{long}_{kind}_temporal_err.tif"
-        paths[base_key + "_spatial_err_unscaled"] = paths[base_key + "_temporal_err"].with_stem(paths[base_key + "_temporal_err"].stem.replace("temporal", "spatial").replace("_tcorr", ""))
 
         data_by_short[short] = {}
 
@@ -339,7 +340,18 @@ def sample_rasters(redo: bool = False) -> gpd.GeoDataFrame:
             outlines.loc[idx, f"neff_{short}"] = neff_model(area)
 
             for key, arr in data_by_short[short].items():
-                outlines.loc[idx, key] = np.nanmean(arr[mask])
+                if "temporal_err" in key:
+                    outlines.loc[idx, key] = np.nanmean(
+                        np.sqrt(
+                            np.clip(
+                                (arr[mask] ** 2) - (data_by_short[short][key.replace("temporal_err", "spatial_err_unscaled")][mask] ** 2),
+                                a_min=0,
+                                a_max=np.inf,
+                            )
+                        )
+                    )
+                else:
+                    outlines.loc[idx, key] = np.nanmean(arr[mask])
 
                 if "slope" in key and "_err" not in key:
                     outlines.loc[idx, f"{key}_positive_vol"] = np.nansum(arr[mask][arr[mask] > 0.]) * res_by_short[short] ** 2
@@ -359,7 +371,7 @@ def sample_rasters(redo: bool = False) -> gpd.GeoDataFrame:
     for key in ["accel_13_24", *base_keys]:
         outlines[f"{key}_spatial_err"] = outlines[f"{key}_spatial_err_unscaled"] / (outlines[f"neff_{key_to_interval(key)}"] ** 0.5)
 
-        outlines[f"{key}_err"] = outlines[[f"{key}_spatial_err", f"{key}_temporal_err"]].max(axis="columns")
+        outlines[f"{key}_err"] = np.hypot(outlines[f"{key}_spatial_err"], outlines[f"{key}_temporal_err"])
 
         for suffix in ["", "_err", "_spatial_err", "_spatial_err_unscaled", "_temporal_err"]:
             outlines[key + "_vol" + suffix] = outlines[key + suffix] * outlines[f"area_{key_to_interval(key)}"]
@@ -451,7 +463,7 @@ def plot_regional_dhdt_fig(all_changes, show: bool = True):
                 y=zone_ydata[params["unit"]],
                 xerr=zone_xdata[params["unit"] + "_err"],
                 yerr=zone_ydata[params["unit"] + "_err"],
-                color="black",
+                color=np.array(matplotlib.colors.to_rgb(zone["color"])) * 0.6,
                 marker="o",
                 markersize=0.8 * zone_xdata["area"] / 1e2,
                 markerfacecolor=zone["color"],
@@ -471,14 +483,14 @@ def plot_regional_dhdt_fig(all_changes, show: bool = True):
             
 
             text_kwargs = {"ha": "center", "va": "center", "path_effects":[matplotlib.patheffects.withStroke(foreground="black", linewidth=1)], "color": "white"}
-            plt.annotate(label,xy_text,zorder=i + 2, **text_kwargs)
+            plt.annotate(label,xy_text,zorder=i + 300, **text_kwargs)
             inset.annotate(label, (zone.geometry.centroid.x, zone.geometry.centroid.y), **text_kwargs)
 
 
-        plt.fill_between(params["vlim"], params["vlim"], [max(params["vlim"])] * 2, color="#018571", alpha=0.2)  
-        plt.text(*params["lessneg_text_xy"], "Less\nnegative", transform=plt.gca().transAxes, color="#018571", ha="center", fontsize=12)
-        plt.text(*params["moreneg_text_xy"], "More\nnegative", transform=plt.gca().transAxes, color="#a6611a", ha="center", fontsize=12)
-        plt.fill_between(params["vlim"], params["vlim"], [min(params["vlim"])] * 2, color="#a6611a", alpha=0.2)  
+        plt.fill_between(params["vlim"], params["vlim"], [max(params["vlim"])] * 2, color=DHDT_SM.to_rgba(1), alpha=0.2)  
+        plt.text(*params["lessneg_text_xy"], "Less\nnegative", transform=plt.gca().transAxes, color=np.array(DHDT_SM.to_rgba(1)[:3]) * 0.7, ha="center", fontsize=12)
+        plt.text(*params["moreneg_text_xy"], "More\nnegative", transform=plt.gca().transAxes, color=np.array(DHDT_SM.to_rgba(-1)[:3]) * 0.7, ha="center", fontsize=12)
+        plt.fill_between(params["vlim"], params["vlim"], [min(params["vlim"])] * 2, color=DHDT_SM.to_rgba(-1), alpha=0.2)  
         plt.plot(params["vlim"], params["vlim"], color="#333", linestyle="--", zorder=0)
         plt.ylim(params["vlim"])
         plt.xlim(params["vlim"])
