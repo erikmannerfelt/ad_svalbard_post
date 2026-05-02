@@ -74,7 +74,9 @@ def get_statistics():
 
                 total_area = np.max([subset[f"area_{interval}"].sum(), 1e-5])
                 vol_rate = subset[vol_col].sum()
-                vol_rate_err = max(subset[vol_col + "_spatial_err_unscaled"].sum() / (neff_model(total_area) ** 0.5), subset[vol_col + "_temporal_err"].sum())
+                baseline_err = subset[vol_col + "_baseline_err_unscaled"].sum() / (neff_model(total_area) ** 0.5)
+                excess_err = subset[vol_col + "_excess_err"].sum()
+                vol_rate_err = np.hypot(baseline_err, excess_err)
 
                 new_changes = {
                     "vol_rate": vol_rate / 1e9,
