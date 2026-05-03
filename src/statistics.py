@@ -19,6 +19,97 @@ def _histogram_mode(values: pd.Series | np.ndarray, bins: np.ndarray) -> float:
     return float((edges[idx] + edges[idx + 1]) / 2)
 
 
+def read_variogram_model() -> pd.DataFrame:
+    return tools.read_aux_csv("variogram_model.csv")
+
+
+def read_empirical_variogram() -> pd.DataFrame:
+    return tools.read_aux_csv("empirical_variogram.csv", index_col=0)
+
+
+# Adapted from https://github.com/mmaelicke/scikit-gstat/blob/c717c15ecdb5ab258efe306850e6c8602044d24b/skgstat/models.py
+def variogram_spherical(h: np.ndarray, r: float, c0: float) -> np.ndarray:
+    h_arr = np.asarray(h, dtype=float)
+    a = r / 1.0
+    ratio = h_arr / a
+    return np.where(h_arr <= r, c0 * ((1.5 * ratio) - (0.5 * ratio**3.0)), c0)
+
+
+# Adapted from https://github.com/mmaelicke/scikit-gstat/blob/c717c15ecdb5ab258efe306850e6c8602044d24b/skgstat/models.py
+def variogram_gaussian(h: np.ndarray, r: float, c0: float) -> np.ndarray:
+    h_arr = np.asarray(h, dtype=float)
+    a = r / 2.0
+    return c0 * (1.0 - np.exp(-(h_arr**2 / a**2)))
+
+# Adapted from https://github.com/GlacioHack/xdem/blob/v0.0.13/xdem/spatialstats.py#L1574-L1609
+def make_variogram_model(params: pd.DataFrame | None = None):
+    model_funs = {
+        "spherical": variogram_spherical,
+        "gaussian": variogram_gaussian,
+    }
+
+    if params is None:
+        params = read_variogram_model()
+
+    def vgm_model(h):
+        h_arr = np.asarray(h, dtype=float)
+        out = np.zeros_like(h_arr, dtype=float)
+        for _, row in params.iterrows():
+            out += model_funs[str(row["model"]) ](h_arr, float(row["range"]), float(row["psill"]))
+        return out
+
+    return vgm_model
+
+
+def variogram_correlation(h, params: pd.DataFrame | None = None):
+    if params is None:
+        params = read_variogram_model()
+    vgm_model = make_variogram_model(params)
+    sill = float(params["psill"].sum())
+    return 1.0 - vgm_model(h) / sill
+
+
+def _format_distance(distance_m: float) -> str:
+    if distance_m < 1000:
+        return f"{int(np.rint(distance_m))}~m"
+    return f"{distance_m / 1000:.1f}~km"
+
+
+def variogram_correlation_breakpoints(params: pd.DataFrame | None = None) -> dict[str, str]:
+    if params is None:
+        params = read_variogram_model()
+
+    h_max = max(50000.0, float(params["range"].max()) * 10.0)
+    hs = np.geomspace(1.0, h_max, 50000)
+    corr = np.asarray(variogram_correlation(hs, params=params), dtype=float)
+
+    thresholds = {"seventyfive": 0.75, "twentyfive": 0.25, "five": 0.05}
+    out: dict[str, str] = {}
+    for key, threshold in thresholds.items():
+        idx = np.flatnonzero(corr <= threshold)
+        if idx.size == 0:
+            out[key] = _format_distance(float(hs[-1]))
+        else:
+            out[key] = _format_distance(float(hs[int(idx[0])]))
+    return out
+
+
+def _get_variogram_statistics() -> dict[str, object]:
+    model = read_variogram_model()
+    component_names = ["first", "second", "third"]
+    model_name_map = {"spherical": "spherical", "gaussian": "Gaussian"}
+
+    variogram = {}
+    for component_name, (_, row) in zip(component_names, model.iterrows(), strict=False):
+        variogram[component_name] = {
+            "model": model_name_map.get(str(row["model"]), str(row["model"])),
+            "range": int(np.rint(float(row["range"]))),
+            "psill": f"{float(row['psill']):.3f}",
+        }
+    variogram["correlation"] = variogram_correlation_breakpoints(model)
+    return {"variogram": variogram}
+
+
 def get_statistics():
     sampled = sampling.sample_rasters()
     to_v_keys = ["slope_13_24", "slope_13_18", "slope_19_24", "accel_13_24"]
@@ -36,6 +127,8 @@ def get_statistics():
         },
         "parameters": {"positive_change_threshold": 0.1, "vertcoreg_min_comparisons": coreg.VERTCOREG_MIN_COMPARISONS},
     }
+
+    all_stats["uncertainty"] = _get_variogram_statistics()
 
     all_stats["changes"] = {}
     rigidcoreg = coreg.read_rigidcoreg_results()

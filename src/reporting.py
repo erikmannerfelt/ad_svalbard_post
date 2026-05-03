@@ -74,7 +74,9 @@ def write_statistics_outputs(new_info: dict[str, object] | None = None) -> dict[
     else:
         info = {}
     if new_info is not None:
-        info = merge_nested_dicts(info, new_info)
+        if "uncertainty" in new_info:
+            info["uncertainty"] = new_info["uncertainty"]
+        info = merge_nested_dicts(info, {key: value for key, value in new_info.items() if key != "uncertainty"})
         INFO_PATH.parent.mkdir(exist_ok=True, parents=True)
         with open(INFO_PATH, "w") as outfile:
             json.dump(format_values(info), outfile, indent=2)

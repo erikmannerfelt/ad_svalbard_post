@@ -9,34 +9,7 @@ import numpy as np
 import pandas as pd
 
 from ..config import FIGURE_DIR
-from .. import sampling, tools
-
-
-def _variogram_spherical(h: np.ndarray, r: float, c0: float) -> np.ndarray:
-    a = r / 1.0
-    ratio = h / a
-    return np.where(h <= r, c0 * ((1.5 * ratio) - (0.5 * ratio**3.0)), c0)
-
-
-def _variogram_gaussian(h: np.ndarray, r: float, c0: float) -> np.ndarray:
-    a = r / 2.0
-    return c0 * (1.0 - np.exp(-(h**2 / a**2)))
-
-
-def _make_variogram_model(params: pd.DataFrame):
-    model_funs = {
-        "spherical": _variogram_spherical,
-        "gaussian": _variogram_gaussian,
-    }
-
-    def vgm_model(h):
-        h_arr = np.asarray(h, dtype=float)
-        out = np.zeros_like(h_arr, dtype=float)
-        for _, row in params.iterrows():
-            out += model_funs[row["model"]](h_arr, float(row["range"]), float(row["psill"]))
-        return out
-
-    return vgm_model
+from .. import sampling, statistics, tools
 
 
 def plot_terrain_err(show: bool = True):
@@ -217,9 +190,9 @@ def plot_patch_method_vs_vgm(show: bool = True):
 
 
 def plot_baseline_err_variogram(show: bool = True):
-    variogram = tools.read_aux_csv("empirical_variogram.csv", index_col=0)
-    params = tools.read_aux_csv("variogram_model.csv")
-    vgm_model = _make_variogram_model(params)
+    variogram = statistics.read_empirical_variogram()
+    params = statistics.read_variogram_model()
+    vgm_model = statistics.make_variogram_model(params)
 
     variogram["bin_width"] = np.r_[[0], np.diff(variogram.index)]
     fig = plt.figure(figsize=(8.3 * 0.81, 5 * 0.81))
