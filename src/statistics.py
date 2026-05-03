@@ -9,6 +9,68 @@ import pandas as pd
 from . import coreg, outlines, reporting, sampling, tools
 
 
+_PER_GLACIER_EXPORTS = [
+    {"key": "storisstraumen", "glac_name": "Storisstraumen", "surging_13_24": True},
+    {"key": "negribreen", "glac_name": "Negribreen", "surging_13_24": True},
+    {"key": "stonebreen", "glac_name": "Stonebreen", "surging_13_24": True},
+    {"key": "kvitoyjokulen", "glac_name": "Kvitøyjøkulen", "surging_13_24": False},
+    {"key": "brasvellbreen", "glac_name": "Bråsvellbreen", "surging_13_24": False},
+]
+
+
+def _per_glacier_stats(row: pd.Series, key: str) -> dict[str, float]:
+    interval = tools.key_to_interval(key)
+    out = {
+        "vol_rate": float(row[f"{key}_vol"] / 1e9),
+        "vol_rate_err": float(row[f"{key}_vol_err"] / 1e9),
+        "area": float(row[f"area_{interval}"] / 1e6),
+        "elev_rate": float(row[key]),
+        "elev_rate_err": float(row[f"{key}_err"]),
+    }
+    return out
+
+
+def _validate_per_glacier_exports(sampled: pd.DataFrame) -> None:
+    ranked_surging = (
+        sampled.loc[sampled["surging_13_24"]]
+        .sort_values("slope_13_24_vol", ascending=True)["glac_name"]
+        .head(3)
+        .tolist()
+    )
+    ranked_nonsurging = (
+        sampled.loc[~sampled["surging_13_24"]]
+        .sort_values("slope_13_24_vol", ascending=True)["glac_name"]
+        .head(2)
+        .tolist()
+    )
+
+    expected_surging = [item["glac_name"] for item in _PER_GLACIER_EXPORTS[:3]]
+    expected_nonsurging = [item["glac_name"] for item in _PER_GLACIER_EXPORTS[3:]]
+
+    if ranked_surging != expected_surging:
+        raise RuntimeError(f"Unexpected top 2013-2024 surging volume-loss glaciers: expected {expected_surging}, found {ranked_surging}")
+    if ranked_nonsurging != expected_nonsurging:
+        raise RuntimeError(f"Unexpected top 2013-2024 nonsurging volume-loss glaciers: expected {expected_nonsurging}, found {ranked_nonsurging}")
+
+
+def _build_per_glacier_exports(sampled: pd.DataFrame, key: str) -> dict[str, dict[str, float]]:
+    out: dict[str, dict[str, float]] = {}
+    for spec in _PER_GLACIER_EXPORTS:
+        slug = spec["key"]
+        row_matches = sampled.loc[sampled["glac_name"].eq(spec["glac_name"])]
+        if row_matches.empty:
+            raise RuntimeError(f"Could not find glacier row for {spec['glac_name']}")
+        if row_matches.shape[0] > 1:
+            raise RuntimeError(f"Glacier name {spec['glac_name']} is not unique; cannot export per-glacier stats safely")
+
+        row = row_matches.iloc[0]
+        if bool(row["surging_13_24"]) != bool(spec["surging_13_24"]):
+            raise RuntimeError(f"Unexpected surging state for {spec['glac_name']}")
+
+        out[slug] = _per_glacier_stats(row, key)
+    return out
+
+
 def _histogram_mode(values: pd.Series | np.ndarray, bins: np.ndarray) -> float:
     arr = np.asarray(values, dtype=float)
     arr = arr[np.isfinite(arr)]
@@ -115,6 +177,7 @@ def get_statistics():
     to_v_keys = ["slope_13_24", "slope_13_18", "slope_19_24", "accel_13_24"]
     intervals = tools.iter_intervals()
     sampled.loc[sampled["rgi_id"] == "RGI2000-v7.0-G-07-00560", [i.surging_col for i in intervals]] = True
+    _validate_per_glacier_exports(sampled)
 
     glacier_zones = outlines.refine_glacier_zones()
     neff_model = sampling.get_neff_model()
@@ -128,7 +191,6 @@ def get_statistics():
         "parameters": {"positive_change_threshold": 0.1, "vertcoreg_min_comparisons": coreg.VERTCOREG_MIN_COMPARISONS},
     }
 
-    all_stats["uncertainty"] = _get_variogram_statistics()
 
     all_stats["changes"] = {}
     rigidcoreg = coreg.read_rigidcoreg_results()
@@ -153,6 +215,7 @@ def get_statistics():
             "between_pair_nmad_post_mean": float(vertcoreg_meta["nmad_post"].mean()),
         },
     }
+    all_stats["uncertainty"] = _get_variogram_statistics()
 
     for key in to_v_keys:
         interval = "_".join(key.split("_")[-2:])
@@ -194,6 +257,8 @@ def get_statistics():
                     if "per_zone" not in changes[partition]:
                         changes[partition]["per_zone"] = {}
                     changes[partition]["per_zone"][zone_label] = new_changes
+
+        changes["per_glacier"] = _build_per_glacier_exports(sampled, key)
 
         if key == "slope_13_24":
             stats_key = "slope_start_end"
