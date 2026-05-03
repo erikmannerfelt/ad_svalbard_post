@@ -10,6 +10,7 @@ import pandas as pd
 
 from ..config import FIGURE_DIR
 from .. import sampling, statistics, tools
+from .common import svg_png_to_jpg
 
 
 def plot_terrain_err(show: bool = True):
@@ -165,7 +166,7 @@ def plot_patch_method_vs_vgm(show: bool = True):
             ax.scatter(patch["exact_areas"] / 1e6, patch["nmad"] * 2, marker="x", c="k", zorder=2, label="Patch method")
             surging = outlines.query(f"surging_{interval.short}")
             nonsurging = outlines.query(f"~surging_{interval.short}")
-            ax.scatter(nonsurging[area_col] / 1e6, nonsurging[col], alpha=0.4, edgecolor="none", s=20, label="Nonsurging")
+            ax.scatter(nonsurging[area_col] / 1e6, nonsurging[col], alpha=0.4, edgecolor="none", s=20, label="Nonsurging", rasterized=True)
             ax.scatter(surging[area_col] / 1e6, surging[col], alpha=0.4, edgecolor="none", s=20, label="Surging")
 
             ax.set_xscale("log")
@@ -181,7 +182,9 @@ def plot_patch_method_vs_vgm(show: bool = True):
                 ax.set_xlabel("Area (km²)")
 
     fig.tight_layout(h_pad=0.1)
-    fig.savefig(FIGURE_DIR / "patch_method_vs_vgm.svg")
+    out_path = FIGURE_DIR / "patch_method_vs_vgm.svg"
+    fig.savefig(out_path, dpi=300)
+    svg_png_to_jpg(out_path)
 
     if show:
         plt.show()
