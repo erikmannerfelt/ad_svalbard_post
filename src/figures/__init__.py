@@ -1,4 +1,4 @@
-from . import coreg, hypsometry, overview, surge, uncertainty, zonal
+from . import coreg, hypsometry, overview, surge, timeseries, uncertainty, zonal
 
 
 def make_all_figures(show: bool = False):
@@ -31,3 +31,6 @@ def make_all_figures(show: bool = False):
 
     print("Generating overview dH/dt figure")
     overview.dhdt_overview_fig(show=show)
+
+    print("Generating point timeseries trends figure")
+    timeseries.plot_point_timeseries_trends(show=show)
