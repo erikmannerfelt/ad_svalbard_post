@@ -34,7 +34,7 @@ def _nanmean_or_warn(values: np.ndarray, *, rgi_id: str, glac_name: str, interva
     return float(np.nanmean(values))
 
 
-def sample_rasters(redo: bool = False, overview_level: int | None = 3) -> gpd.GeoDataFrame:
+def sample_rasters(redo: bool = False, overview_level: int | None = 3, use_tqdm: bool = True) -> gpd.GeoDataFrame:
     cache_path = CACHE_DIR / "outlines_sampled.arrow"
 
     if cache_path.is_file() and not redo:
@@ -111,7 +111,7 @@ def sample_rasters(redo: bool = False, overview_level: int | None = 3) -> gpd.Ge
         outlines_df[f"area_{interval.short}"] = np.nan
         outlines_df[f"neff_{interval.short}"] = np.nan
 
-    for idx, outline in tqdm.tqdm(outlines_df.iterrows(), total=outlines_df.shape[0], desc="Applying sampled raster data"):
+    for idx, outline in tqdm.tqdm(outlines_df.iterrows(), total=outlines_df.shape[0], desc="Applying sampled raster data", disable=not use_tqdm):
         for interval, _ in interval_raster_kinds:
             mask = rasterized_by_short[interval.short] == outline["id"]
             area = np.count_nonzero(mask) * res_by_short[interval.short] ** 2

@@ -100,14 +100,32 @@ def make_outlines(redo: bool = False):
     rgi7_orig = gpd.read_file("zip://input/RGI_V7_Surge_Database.zip/RGI_V7_Surge_Database/RGI2000-v7.0-G-07_svalbard_jan_mayen_Surge_Database.shp").to_crs(CRS_EPSG)
     rgi7_orig["geometry"] = rgi7_orig["geometry"].buffer(0)
 
+    base_cols = [
+        "rgi_id",
+        "glims_id",
+        "utm_zone",
+        "term_type",
+        "glac_name",
+        "glac_name_",
+        "slope_deg",
+        "aspect_deg",
+        "S_Direct",
+        "S_Indirect",
+        "S_All",
+        "S_Onset",
+        "S_Term",
+        "geometry",
+    ]
+
     field_overrides = {
+        "RGI2000-v7.0-G-07-00741": {"term_type": 1},  # Scheelebreen became tidewater during the study period; treat it as tidewater throughout.
         "RGI2000-v7.0-G-07-01312": {"glac_name": "Lilliehöökbreen"},
         "RGI2000-v7.0-G-07-01379": {"S_Onset": "2015", "S_Term": "Ongoing", "glac_name": "Austfonna Basin-7"},
         "RGI2000-v7.0-G-07-01383": {"glac_name": "Storisstraumen"},
         "RGI2000-v7.0-G-07-01385": {"glac_name": "Austfonna Basin-2"},
         "RGI2000-v7.0-G-07-01381": {"glac_name": "Austfonna Basin-5"},
         "RGI2000-v7.0-G-07-01384": {"glac_name": "Bråsvellbreen"},
-        "RGI2000-v7.0-G-07-00560": {"S_Onset": "2012", "S_Term": "Ongoing"},
+        "RGI2000-v7.0-G-07-00560": {"S_Onset": "2012", "S_Term": "Ongoing"},  # dH/dt observation of Tinkarpbreen
         "RGI2000-v7.0-G-07-00888": {"S_Onset": "2016", "S_Term": "2019"},  # Sveitsarfonna mirroring Penckbreen
         "RGI2000-v7.0-G-07-00899": {"S_Onset": "1890; 2008", "S_Term": "1890; 2017"},  # Zawadzkibreen mirroring Nathorstbreen
         "RGI2000-v7.0-G-07-00902": {"S_Onset": "1890; 2008", "S_Term": "1890; 2017"},  # Polakkbreen mirroring Nathorstbreen
@@ -118,10 +136,20 @@ def make_outlines(redo: bool = False):
         for key, value in overrides.items():
             rgi7_orig.loc[idx, key] = value
 
+    probably_tidewater = rgi7_orig["term_type"].eq(1) | rgi7_orig["zmin_m"].le(25)
+
+    glacier_zones = gpd.read_file("shapes/glacier_zones.geojson").to_crs(CRS_EPSG)[["zone_label", "zone_name", "geometry"]]
+    centroids = gpd.GeoDataFrame(rgi7_orig[["rgi_id"]].copy(), geometry=rgi7_orig.geometry.centroid, crs=CRS_EPSG)
+    zone_matches = gpd.sjoin(centroids, glacier_zones, how="left", predicate="within")
+    if zone_matches.index.duplicated().any() or zone_matches["zone_label"].isna().any():
+        missing = zone_matches.loc[zone_matches["zone_label"].isna(), "rgi_id"].tolist()
+        raise RuntimeError(f"Problematic zone assignment. Matched none or too many zones. Missing: {missing}")
+
     outline_corrections = gpd.read_file("shapes/outline_corrections.geojson")
     outline_corrections["is_extension"] = outline_corrections["fix_type"].str.contains("partition_override")
 
-    outlines_df = rgi7_orig.drop(columns=["geometry"]).copy()
+    outlines_df = rgi7_orig[base_cols].drop(columns=["geometry"]).copy()
+    outlines_df[["zone_label", "zone_name"]] = zone_matches[["zone_label", "zone_name"]].to_numpy()
     rgi_id_to_idx = rgi7_orig.reset_index().set_index("rgi_id")["index"].to_dict()
 
     for interval in intervals:
@@ -150,14 +178,17 @@ def make_outlines(redo: bool = False):
             rgi7.loc[outline_idx[0], "geometry"] = rgi7.loc[outline_idx[0], "geometry"].union(item["geometry"])
             rgi7.loc[overlaps, "modified"] = True
 
-        rgi7["geometry"] = rgi7["geometry"].intersection(coastline["geometry"])
+        # Keep only the coastline-constrained geometries for glaciers that are likely tidewater.
+        orig_area = rgi7.loc[probably_tidewater, "geometry"].area
+        clipped = rgi7.loc[probably_tidewater, "geometry"].intersection(coastline["geometry"])
+        coast_modified = (orig_area - clipped.area) > 1.
+        rgi7.loc[coast_modified.index[coast_modified], "modified"] = True
+        rgi7.loc[probably_tidewater, "geometry"] = clipped
         outlines_df[interval.geometry_col] = gpd.GeoSeries(rgi7["geometry"].values, crs=CRS_EPSG)
         outlines_df[interval.modified_col] = rgi7["modified"].values
         outlines_df[interval.surging_col] = [surge_overlaps_interval(term_value, onset_value, interval.start_year, interval.end_year) for term_value, onset_value in zip(rgi7["S_Term"], rgi7["S_Onset"])]
 
     outlines_df = gpd.GeoDataFrame(outlines_df, geometry=tools.get_interval("13_24").geometry_col, crs=CRS_EPSG)
-    glacier_zones = gpd.read_file("shapes/glacier_zones.geojson").to_crs(outlines_df.crs).set_index("zone_label")
-    outlines_df = gpd.sjoin(outlines_df, glacier_zones, how="left", predicate="intersects").reset_index(drop=True)
     for interval in intervals:
         outlines_df[interval.area_col] = outlines_df[interval.geometry_col].area
 
@@ -166,10 +197,10 @@ def make_outlines(redo: bool = False):
     return outlines_df
 
 
-def refine_glacier_zones():
+def refine_glacier_zones(redo: bool = False):
     cache_path = CACHE_DIR / "refined_glacier_zones.arrow"
 
-    if cache_path.is_file():
+    if cache_path.is_file() and not redo:
         return gpd.read_feather(cache_path)
 
     glacier_zones = gpd.read_file("shapes/glacier_zones.geojson").set_index("zone_label")
