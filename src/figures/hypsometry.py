@@ -40,7 +40,7 @@ def plot_hypsometric_profiles(show: bool = True):
         axis.set_xlim(xlim)
 
         if col in [0, 4]:
-            axis.set_ylabel("dH / dt (m a$^{-1}$)")
+            axis.set_ylabel("dH dt$^{-1}$ (m a$^{-1}$)")
         if col >= ncols:
             axis.set_xlabel("Elevation (m a.s.l.)")
         if (col + 1) == len(zone_meta):

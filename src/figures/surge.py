@@ -124,7 +124,12 @@ def plot_surge_nosurge_bar(show: bool = True):
         for surging, data in outlines.groupby(f"surging_{key_to_interval(val_col)}"):
             data = _prepare_stack(data, vol_col)
             stack_vol = data["stack_vol"].to_numpy(dtype=float)
-            strip = _stack_to_rgba_strip(stack_vol, np.asarray(surge_colors[surging]["even_color"], dtype=float), np.asarray(surge_colors[surging]["odd_color"], dtype=float))
+            rgba_strip_args = np.asarray(surge_colors[surging]["even_color"], dtype=float), np.asarray(surge_colors[surging]["odd_color"], dtype=float)
+            # Ugly hack that works: if the count is even, flip the colors so it ends with the same color regardless of evenness
+            if data.shape[0] % 2 == 0:
+                rgba_strip_args = rgba_strip_args[::-1]
+            strip = _stack_to_rgba_strip(stack_vol, *rgba_strip_args)
+                
             total_height = float(stack_vol.sum())
             x = float(int(surging))
             extent = (x - 0.38, x + 0.38, 0.0, -total_height)

@@ -33,7 +33,7 @@ def dhdt_overview_fig(show: bool = True):
 
     def add_inset(axis, left=0.6):
         inset = axis.inset_axes((left, 0.02, 0.1, 0.15))
-        cbar = plt.colorbar(DHDT_SM, cax=inset, pad=0.02)
+        cbar = plt.colorbar(DHDT_SM, cax=inset, pad=0.02, extend="both")
         text2 = plt.text(1.15, 0.5, "m a$^{-1}$", ha="left", va="center", transform=inset.transAxes)
         cbar.set_ticks([DHDT_NORMALIZER.vmin, DHDT_NORMALIZER.vmax], labels=[f"≤{DHDT_NORMALIZER.vmin:.0f}", f"≥{DHDT_NORMALIZER.vmax:.0f}"])
         return [text2, inset]

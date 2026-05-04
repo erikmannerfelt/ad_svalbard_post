@@ -108,6 +108,7 @@ def plot_point_timeseries_trends(show: bool = True):
             cbar.set_ticklabels(["1", "≥10"])
             cbar.ax.tick_params(labelsize=6, length=2)
             cbar.outline.set_linewidth(0.6)
+            cbar.set_label("Count", labelpad=-5)
 
     for axis in axes[len(data):]:
         axis.axis("off")

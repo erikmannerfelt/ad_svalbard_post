@@ -175,7 +175,7 @@ def plot_patch_method_vs_vgm(show: bool = True):
             ax.set_xlim(0.03, 1500)
             ax.set_ylim(5e-3, 1.7)
             if j == 0 and i == 1:
-                ax.set_ylabel("Uncertainty (m)")
+                ax.set_ylabel("Integrated uncertainty (m)")
             if j == 0 and i == (len(intervals) - 1):
                 ax.legend(fontsize=8)
             if i == (len(intervals) - 1):
