@@ -16,8 +16,8 @@ from ..tools import key_to_interval
 def _plot_surging_vs_nonsurging_volume_violin(outlines: gpd.GeoDataFrame, show: bool = True):
     fig = plt.figure(figsize=(4, 3))
 
-    for issurging, items in outlines.groupby("surging_13_24"):
-        plt.violinplot([np.log10(np.clip(-items["slope_13_24_vol"], a_min=1e-6, a_max=np.inf))], positions=[float(issurging)])
+    for issurging, items in outlines.groupby(f"surging_{interval}"):
+        plt.violinplot([np.log10(np.clip(-items[f"slope_{interval}_vol"], a_min=1e-6, a_max=np.inf))], positions=[float(issurging)])
 
     plt.ylim(10, 3)
     plt.xticks([0, 1], ["Nonsurging", "Surging"])
@@ -38,9 +38,9 @@ def _plot_surging_vs_nonsurging_hist(outlines: gpd.GeoDataFrame, show: bool = Tr
     axes = fig.subplots(2, 1, sharex=True, sharey=False).ravel().tolist()
     fig.subplots_adjust(left=0.135, bottom=0.165, right=0.995, top=0.98, hspace=0.1)
 
-    for i, (issurging, items) in enumerate(outlines.groupby("surging_13_24")):
+    for i, (issurging, items) in enumerate(outlines.groupby(f"surging_{interval}")):
         axis = axes[i]
-        vals = items["slope_13_24"].dropna()
+        vals = items[f"slope_{interval}"].dropna()
         axis.hist(vals, bins=np.linspace(-5, 1, 30 if issurging else 100), color="#ff6666" if issurging else "#6699ff")
 
         if i == 0:
@@ -160,8 +160,9 @@ def plot_surging_vs_nonsurging_figures(show: bool = True):
 
 
 def plot_postsurge_anomaly_by_time(show: bool = True):
+    interval = "13_24"
     outlines = gpd.read_feather(CACHE_DIR / "outlines_sampled.arrow")
-    outlines = outlines.loc[outlines["slope_13_24"].notna() & outlines["zone_label"].notna() & outlines["area_13_24"].notna()].copy()
+    outlines = outlines.loc[outlines[f"slope_{interval}"].notna() & outlines["zone_label"].notna() & outlines[f"area_{interval}"].notna()].copy()
 
     def _parse_years(value):
         if pd.isna(value):
@@ -185,16 +186,16 @@ def plot_postsurge_anomaly_by_time(show: bool = True):
         frame["never_surged"] = frame["term_years"].str.len().eq(0) & frame["onset_years"].str.len().eq(0)
         frame["last_term_pre2013"] = frame["term_years"].apply(lambda years: max([year for year in years if year < 2013], default=np.nan))
         frame["years_since_last_surge_2013"] = 2013 - frame["last_term_pre2013"]
-        frame["log_area"] = np.log10(frame["area_13_24"])
+        frame["log_area"] = np.log10(frame[f"area_{interval}"])
 
-        large = frame.loc[frame["area_13_24"] > 1e6].copy()
-        surged = large.loc[large["last_term_pre2013"].notna() & large["years_since_last_surge_2013"].notna() & ~large["surging_13_24"].fillna(False)].copy()
+        large = frame.loc[frame[f"area_{interval}"] > 1e6].copy()
+        surged = large.loc[large["last_term_pre2013"].notna() & large["years_since_last_surge_2013"].notna() & ~large[f"surging_{interval}"].fillna(False)].copy()
         never = large.loc[large["never_surged"]].copy()
 
         if surged.empty or never.empty:
             raise RuntimeError("Not enough large-glacier surge or control data to build post-surge anomaly figure")
 
-        never_zone_medians = never.groupby("zone_label", observed=False)["slope_13_24"].median()
+        never_zone_medians = never.groupby("zone_label", observed=False)[f"slope_{interval}"].median()
         surged = surged.loc[surged["zone_label"].isin(never_zone_medians.index)].copy()
         never = never.loc[never["zone_label"].isin(never_zone_medians.index)].copy()
 
@@ -203,8 +204,8 @@ def plot_postsurge_anomaly_by_time(show: bool = True):
 
         surged["zone_control_median"] = surged["zone_label"].map(never_zone_medians)
         never["zone_control_median"] = never["zone_label"].map(never_zone_medians)
-        surged["anomaly"] = surged["slope_13_24"] - surged["zone_control_median"]
-        never["anomaly"] = never["slope_13_24"] - never["zone_control_median"]
+        surged["anomaly"] = surged[f"slope_{interval}"] - surged["zone_control_median"]
+        never["anomaly"] = never[f"slope_{interval}"] - never["zone_control_median"]
 
         bins = [0, 20, 40, 60, 80, 100, 120]
         labels = ["0-20", "20-40", "40-60", "60-80", "80-100", "100+"]
