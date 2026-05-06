@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import matplotlib.colors
+import matplotlib.patches
+import matplotlib.lines
 import matplotlib.pyplot as plt
 import numpy as np
 import geopandas as gpd
 import pandas as pd
 
 from ..config import CACHE_DIR, FIGURE_DIR
+from ..outlines import refine_glacier_zones
 from ..tools import key_to_interval
 
 
@@ -154,3 +157,147 @@ def plot_surging_vs_nonsurging_figures(show: bool = True):
     outlines = gpd.read_feather(CACHE_DIR / "outlines_sampled.arrow")
     _plot_surging_vs_nonsurging_volume_violin(outlines, show=show)
     _plot_surging_vs_nonsurging_hist(outlines, show=show)
+
+
+def plot_postsurge_anomaly_by_time(show: bool = True):
+    outlines = gpd.read_feather(CACHE_DIR / "outlines_sampled.arrow")
+    outlines = outlines.loc[outlines["slope_13_24"].notna() & outlines["zone_label"].notna() & outlines["area_13_24"].notna()].copy()
+
+    def _parse_years(value):
+        if pd.isna(value):
+            return []
+        for part in str(value).split(";"):
+            token = part.strip()
+            if not token:
+                continue
+            low = token.lower()
+            if low in {"n/a", "not observed", "ongoing"}:
+                continue
+            try:
+                yield int(token)
+            except ValueError:
+                continue
+
+    def _prepare_postsurge_frame(frame: gpd.GeoDataFrame):
+        frame = frame.copy()
+        frame["term_years"] = frame["S_Term"].apply(lambda value: list(_parse_years(value)))
+        frame["onset_years"] = frame["S_Onset"].apply(lambda value: list(_parse_years(value)))
+        frame["never_surged"] = frame["term_years"].str.len().eq(0) & frame["onset_years"].str.len().eq(0)
+        frame["last_term_pre2013"] = frame["term_years"].apply(lambda years: max([year for year in years if year < 2013], default=np.nan))
+        frame["years_since_last_surge_2013"] = 2013 - frame["last_term_pre2013"]
+        frame["log_area"] = np.log10(frame["area_13_24"])
+
+        large = frame.loc[frame["area_13_24"] > 1e6].copy()
+        surged = large.loc[large["last_term_pre2013"].notna() & large["years_since_last_surge_2013"].notna() & ~large["surging_13_24"].fillna(False)].copy()
+        never = large.loc[large["never_surged"]].copy()
+
+        if surged.empty or never.empty:
+            raise RuntimeError("Not enough large-glacier surge or control data to build post-surge anomaly figure")
+
+        never_zone_medians = never.groupby("zone_label", observed=False)["slope_13_24"].median()
+        surged = surged.loc[surged["zone_label"].isin(never_zone_medians.index)].copy()
+        never = never.loc[never["zone_label"].isin(never_zone_medians.index)].copy()
+
+        if surged.empty or never.empty:
+            raise RuntimeError("No overlapping zones between surged and never-surged large glaciers")
+
+        surged["zone_control_median"] = surged["zone_label"].map(never_zone_medians)
+        never["zone_control_median"] = never["zone_label"].map(never_zone_medians)
+        surged["anomaly"] = surged["slope_13_24"] - surged["zone_control_median"]
+        never["anomaly"] = never["slope_13_24"] - never["zone_control_median"]
+
+        bins = [0, 20, 40, 60, 80, 100, 120]
+        labels = ["0-20", "20-40", "40-60", "60-80", "80-100", "100+"]
+        surged["age_bin"] = pd.cut(surged["years_since_last_surge_2013"], bins=bins, labels=labels, include_lowest=True, right=True)
+        surged = surged.loc[surged["age_bin"].notna()].copy()
+
+        if surged.empty:
+            raise RuntimeError("No large pre-2013 surge-terminated glaciers fell into the requested age bins")
+
+        return surged, never, labels
+
+    def _bootstrap_median_ci(values: pd.Series, n_iter: int = 10000, seed: int = 0):
+        values = values.dropna().to_numpy(dtype=float)
+        if values.size == 0:
+            return np.nan, np.nan, np.nan
+        rng = np.random.default_rng(seed)
+        samples = np.empty(n_iter, dtype=float)
+        for i in range(n_iter):
+            samples[i] = float(np.median(rng.choice(values, size=values.size, replace=True)))
+        return float(np.quantile(samples, 0.025)), float(np.median(samples)), float(np.quantile(samples, 0.975))
+
+    def _sample_null_medians(zone_control_map: dict[str, np.ndarray], zone_counts: dict[str, int], n_iter: int = 10000, seed: int = 0):
+        rng = np.random.default_rng(seed)
+        samples = np.full(n_iter, np.nan, dtype=float)
+        zones = [zone for zone, count in zone_counts.items() if count > 0 and zone in zone_control_map and zone_control_map[zone].size > 0]
+        if not zones:
+            return samples
+        for i in range(n_iter):
+            vals = []
+            for zone in zones:
+                pool = zone_control_map[zone]
+                count = zone_counts[zone]
+                vals.append(rng.choice(pool, size=count, replace=pool.size < count))
+            samples[i] = float(np.median(np.concatenate(vals)))
+        return samples
+
+    surged, never, labels = _prepare_postsurge_frame(outlines)
+
+    glacier_zones = refine_glacier_zones()
+    zone_labels = sorted(surged["zone_label"].dropna().unique().tolist())
+    zone_colors = {label: glacier_zones.loc[label, "color"] for label in zone_labels if label in glacier_zones.index}
+
+    fig, ax = plt.subplots(figsize=(7.2, 4.0))
+    fig.subplots_adjust(left=0.12, bottom=0.16, right=0.98, top=0.93)
+
+    x_positions = np.array([10, 30, 50, 70, 90, 110], dtype=float)
+    box_edges = [0, 20, 40, 60, 80, 100, 120]
+
+    control_zone_map = {zone: grp["anomaly"].dropna().to_numpy(dtype=float) for zone, grp in never.groupby("zone_label", observed=False)}
+
+    legend_handles = []
+    seen_legend = set()
+    for x, label, left, right in zip(x_positions, labels, box_edges[:-1], box_edges[1:], strict=False):
+        subset = surged.loc[surged["age_bin"] == label].copy()
+        if subset.empty:
+            continue
+
+        zone_counts = subset["zone_label"].value_counts().to_dict()
+        null_samples = _sample_null_medians(control_zone_map, zone_counts, n_iter=8000, seed=42 + int(x))
+        null_samples = null_samples[np.isfinite(null_samples)]
+        if null_samples.size:
+            null_q16, null_q50, null_q84 = np.quantile(null_samples, [0.16, 0.5, 0.84])
+            null_q025, _, null_q975 = np.quantile(null_samples, [0.025, 0.5, 0.975])
+            ax.add_patch(matplotlib.patches.Rectangle((left, null_q025), right - left, null_q975 - null_q025, facecolor="#d9d9d9", edgecolor="none", alpha=0.45, zorder=0))
+            ax.add_patch(matplotlib.patches.Rectangle((left, null_q16), right - left, null_q84 - null_q16, facecolor="#bdbdbd", edgecolor="none", alpha=0.7, zorder=1))
+            ax.hlines(null_q50, left, right, color="#666", linewidth=0.8, zorder=2)
+
+        obs_low, obs_med, obs_high = _bootstrap_median_ci(subset["anomaly"], n_iter=6000, seed=100 + int(x))
+        ax.errorbar(x, obs_med, yerr=[[obs_med - obs_low], [obs_high - obs_med]], fmt="o", color="#333", ecolor="#333", elinewidth=1.2, capsize=3, markersize=5.5, zorder=5)
+
+        for j, (_, row) in enumerate(subset.iterrows()):
+            color = zone_colors.get(row["zone_label"], (0.35, 0.35, 0.35, 1.0))
+            point_x = min(float(row["years_since_last_surge_2013"]), 120.0)
+            ax.scatter(point_x, row["anomaly"], s=9, color=color, alpha=0.75, edgecolors="white", linewidths=0.2, zorder=4)
+            if row["zone_label"] not in seen_legend:
+                seen_legend.add(row["zone_label"])
+                legend_handles.append(matplotlib.lines.Line2D([0], [0], marker="o", color="none", markerfacecolor=color, markeredgecolor="white", markeredgewidth=0.3, markersize=5, label=row["zone_label"]))
+
+        ax.annotate(f"n={len(subset)}", (x, 0.02), xycoords=(ax.transData, ax.transAxes), ha="center", va="bottom", fontsize=8)
+
+    ax.axhline(0, color="#444", linewidth=0.8, zorder=3)
+    ax.set_xticks(x_positions, labels)
+    ax.set_xlabel("Years since last observed surge termination")
+    ax.set_ylabel("Zonal dH dt$^{-1}$ anomaly (m a$^{-1}$)")
+
+    if legend_handles:
+        ax.legend(handles=legend_handles, title="Zone", fontsize=8, title_fontsize=8, frameon=False, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+
+    ax.set_xlim(0, 120)
+    fig.tight_layout()
+    fig.savefig(FIGURE_DIR / "postsurge_anomaly_by_time.svg", dpi=300)
+
+    if show:
+        plt.show()
+
+    plt.close(fig)

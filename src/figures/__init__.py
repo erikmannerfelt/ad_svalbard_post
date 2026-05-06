@@ -17,6 +17,9 @@ def make_all_figures(show: bool = False):
     print("Generating surge comparison figures")
     surge.plot_surging_vs_nonsurging_figures(show=show)
 
+    print("Generating post-surge anomaly figure")
+    surge.plot_postsurge_anomaly_by_time(show=show)
+
     print("Generating zonal dH/dt figure")
     zonal.plot_zone_dhdt_fig(show=show)
 
