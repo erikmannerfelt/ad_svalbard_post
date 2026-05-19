@@ -32,8 +32,9 @@ def make_all_figures(show: bool = False):
     print("Generating hypsometry figure")
     hypsometry.plot_hypsometric_profiles(show=show)
 
-    print("Generating overview dH/dt figure")
-    overview.dhdt_overview_fig(show=show)
-
     print("Generating point timeseries trends figure")
     timeseries.plot_point_timeseries_trends(show=show)
+
+    # This figure takes time to generate, so it's nice to have that last.
+    print("Generating overview dH/dt figure")
+    overview.dhdt_overview_fig(show=show)

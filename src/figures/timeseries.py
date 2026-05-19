@@ -70,7 +70,7 @@ def plot_point_timeseries_trends(show: bool = True):
         counts = np.asarray([parse_float(row.get(f"{year}_count")) for year in YEARS], dtype=float)
         valid = np.isfinite(xs) & np.isfinite(ys)
 
-        axis.errorbar(xs[valid], ys[valid], yerr=yerr[valid] * 2, fmt="none", ecolor="0.2", capsize=2, lw=0.9, alpha=0.8)
+        axis.errorbar(xs[valid], ys[valid], yerr=yerr[valid], fmt="none", ecolor="0.2", capsize=2, lw=0.9, alpha=0.8)
         axis.scatter(xs[valid], ys[valid], c=cmap(norm(np.clip(counts[valid], 1, 10))), s=20, edgecolors="0.15", linewidths=0.25, zorder=3)
 
         ref_2013_x = get_reference_x(row, 2013, FALLBACK_2013_REFERENCE_X)
@@ -117,7 +117,7 @@ def plot_point_timeseries_trends(show: bool = True):
         axis.set_xlabel("Year")
 
     legend_handles = [
-        Line2D([0], [0], color="k", marker="o", lw=1, ms=4, label="Annual medians ± 2x NMAD"),
+        Line2D([0], [0], color="k", marker="o", lw=1, ms=4, label="Annual medians ± NMAD"),
         Line2D([0], [0], color="black", lw=1.6, label="2013–2018 / 2019–2024 trend"),
         Line2D([0], [0], color="0.65", lw=2.0, label="2013–2024 trend"),
     ]

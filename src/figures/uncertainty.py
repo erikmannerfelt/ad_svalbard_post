@@ -163,7 +163,7 @@ def plot_patch_method_vs_vgm(show: bool = True):
         for j, (col, name) in enumerate([(f"slope_{interval.short}_baseline_err", r"$\sigma_{baseline}$ " + interval.display_label), (f"slope_{interval.short}_excess_err", r"$\sigma_{excess}$ " + interval.display_label), (f"slope_{interval.short}_err", f"Total {interval.display_label}")]):
             ax: plt.Axes = axes[i, j]
             ax.set_title(name)
-            ax.scatter(patch["exact_areas"] / 1e6, patch["nmad"] * 2, marker="x", c="k", zorder=2, label="Patch method")
+            ax.scatter(patch["exact_areas"] / 1e6, patch["nmad"], marker="x", c="k", zorder=2, label="Patch method")
             surging = outlines.query(f"surging_{interval.short}")
             nonsurging = outlines.query(f"~surging_{interval.short}")
             ax.scatter(nonsurging[area_col] / 1e6, nonsurging[col], alpha=0.4, edgecolor="none", s=20, label="Nonsurging", rasterized=True)
@@ -173,7 +173,7 @@ def plot_patch_method_vs_vgm(show: bool = True):
             ax.set_yscale("log")
             ax.yaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
             ax.set_xlim(0.03, 1500)
-            ax.set_ylim(5e-3, 1.7)
+            ax.set_ylim(2.5e-3, 1.7 / 2)
             if j == 0 and i == 1:
                 ax.set_ylabel("Integrated uncertainty (m)")
             if j == 0 and i == (len(intervals) - 1):

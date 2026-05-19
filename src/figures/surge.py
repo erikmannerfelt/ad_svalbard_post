@@ -11,11 +11,13 @@ import pandas as pd
 from ..config import CACHE_DIR, FIGURE_DIR
 from ..outlines import refine_glacier_zones
 from ..tools import key_to_interval
+from .. import tools
 
 
 def _plot_surging_vs_nonsurging_volume_violin(outlines: gpd.GeoDataFrame, show: bool = True):
     fig = plt.figure(figsize=(4, 3))
 
+    interval = "13_24"
     for issurging, items in outlines.groupby(f"surging_{interval}"):
         plt.violinplot([np.log10(np.clip(-items[f"slope_{interval}_vol"], a_min=1e-6, a_max=np.inf))], positions=[float(issurging)])
 
@@ -37,6 +39,7 @@ def _plot_surging_vs_nonsurging_hist(outlines: gpd.GeoDataFrame, show: bool = Tr
     fig = plt.figure(figsize=(4, 3))
     axes = fig.subplots(2, 1, sharex=True, sharey=False).ravel().tolist()
     fig.subplots_adjust(left=0.135, bottom=0.165, right=0.995, top=0.98, hspace=0.1)
+    interval = "13_24"
 
     for i, (issurging, items) in enumerate(outlines.groupby(f"surging_{interval}")):
         axis = axes[i]
