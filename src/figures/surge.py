@@ -63,16 +63,28 @@ def _plot_surging_vs_nonsurging_hist(outlines: gpd.GeoDataFrame, show: bool = Tr
     plt.close()
 
 
-def plot_surge_nosurge_bar(show: bool = True):
+def plot_surge_nosurge_bar(show: bool = True, full_range: bool = False):
     outlines = gpd.read_feather(CACHE_DIR / "outlines_sampled.arrow")
+
     val_cols = ["slope_13_18", "slope_19_24"]
-    titles = ["2013-2018", "2019-2024"]
+    # titles = ["2013-2018", "2019-2024"]
+    if full_range:
+        val_cols = ["slope_13_24"]
+        # titles = ["2013-2024"]
+
+
+       
+        
     surge_colors = {
         True: {"even_color": matplotlib.colors.to_rgba("#c76b2a"), "odd_color": matplotlib.colors.to_rgba("#e0a36a")},
         False: {"odd_color": matplotlib.colors.to_rgba("#2b8cbe"), "even_color": matplotlib.colors.to_rgba("#66c2d7")},
     }
-    fig = plt.figure(figsize=(8, 3))
-    axes = fig.subplots(1, 2, sharey=True)
+    fig = plt.figure(figsize=(4 * len(val_cols), 3))
+    axes = fig.subplots(1, len(val_cols), sharey=True)
+    try:
+        axes = list(axes)
+    except TypeError:
+        axes = [axes]
 
     def _prepare_stack(data: pd.DataFrame, vol_col: str) -> pd.DataFrame:
         data = data[["glac_name", vol_col]].copy()
@@ -123,8 +135,8 @@ def plot_surge_nosurge_bar(show: bool = True):
         return strip
 
     for i, val_col in enumerate(val_cols):
-        ax: plt.Axes = axes.ravel()[i]
-        ax.set_title(titles[i])
+        ax: plt.Axes = axes[i]
+        ax.set_title(tools.get_interval(val_col.replace("slope_", "")).display_label)
         vol_col = val_col + "_loss"
         outlines[vol_col] = outlines.geometry.area * outlines[val_col] / 1e9
         for surging, data in outlines.groupby(f"surging_{key_to_interval(val_col)}"):
@@ -150,7 +162,10 @@ def plot_surge_nosurge_bar(show: bool = True):
         if i == 0:
             ax.set_ylabel("Volume change rate (km$^3$ a$^{-1}$)")
     fig.tight_layout()
-    fig.savefig(FIGURE_DIR / "surge_nosurge_bar.svg", dpi=300)
+    out_path = FIGURE_DIR / "surge_nosurge_bar.svg"
+    if full_range:
+        out_path = out_path.with_stem(out_path.stem + "_2013-2024")
+    fig.savefig(out_path, dpi=300)
 
     if show:
         plt.show()
