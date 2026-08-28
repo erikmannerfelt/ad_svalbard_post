@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
+import matplotlib.patheffects
+import pandas as pd
 
 from .. import outlines
+from .. import statistics
 from .common import DHDT_NORMALIZER, DHDT_SM, svg_png_to_jpg
 
 
@@ -11,8 +14,104 @@ def dhdt_overview_fig(show: bool = True):
     import rasterio.features
 
     coasts = outlines.make_coastline_intervals()
-    fig = plt.figure(figsize=(8.3, 5.3))
-    axes = fig.subplots(1, 2, sharex=True, sharey=True).ravel().tolist()
+    glacier_zones = outlines.refine_glacier_zones().drop(labels=["K"])
+
+    data = statistics.compute_hypsometric_profiles()
+    zone_meta = data["zone_meta"].drop(index="K", errors="ignore")
+    per_zone = data["per_zone"]
+    intervals = data["intervals"]
+
+    import matplotlib.pyplot as plt
+
+
+    xmin = 400_000
+    ymax = 8_950_000
+    height = 469_000
+    box_aspect = 1.38  # height / width
+
+    width = height / box_aspect
+    xmax = xmin + width
+    ymin = ymax - height
+
+    fig = plt.figure(figsize=(8.3, 6.6)) # TODO: GLR allows only 7.09 inch wide figures
+
+    outer = fig.add_gridspec(
+        nrows=2,
+        ncols=1,
+        height_ratios=[5.3, 0.9],
+        left=0.055,
+        right=0.985,
+        bottom=0.065,
+        top=0.985,
+        hspace=0.035,
+    )
+
+
+    # ------------------------------------------------------------------
+    # Two large maps
+    # ------------------------------------------------------------------
+
+    gs_maps = outer[0].subgridspec(
+        nrows=1,
+        ncols=2,
+        wspace=0.035,
+    )
+
+    ax_map1 = fig.add_subplot(gs_maps[0, 0])
+    ax_map2 = fig.add_subplot(gs_maps[0, 1])
+
+    for ax in (ax_map1, ax_map2):
+        ax.set_xlim(xmin, xmax)
+        ax.set_ylim(ymin, ymax)
+
+        # Coordinate units are metres in both directions
+        ax.set_aspect("equal", adjustable="box")
+
+        # Height / width of the physical axes
+        ax.set_box_aspect(box_aspect)
+
+    map_axes = [ax_map1, ax_map2]
+    
+
+    # ------------------------------------------------------------------
+    # Eight small panels in one row
+    # ------------------------------------------------------------------
+
+    gs_small = outer[1].subgridspec(
+        nrows=1,
+        ncols=8,
+        wspace=0.12,
+    )
+
+    ax_small = [fig.add_subplot(gs_small[0, 0])]
+
+    for i in range(1, 8):
+        ax_small.append(
+            fig.add_subplot(
+                gs_small[0, i],
+                sharey=ax_small[0],
+            )
+        )
+
+    for ax in ax_small:
+        ax.label_outer()
+
+    # zone_inset = mpl_toolkits.axes_grid1.inset_locator.inset_axes(ax, width="50%", height="50%", loc="upper left", borderpad=0, bbox_to_anchor=(0, 0, 1, 1), bbox_transform=ax.transAxes)
+    zone_inset = fig.add_axes((0., 0.23, 0.16, 0.16 * box_aspect))
+
+
+    all_axes = [*map_axes,zone_inset, *ax_small]
+    for label, ax in zip("abcdefghijk", all_axes):
+        ax.text(
+            0.02, 0.98, f"{label})",
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+        )
+
+
+    # fig = plt.figure(figsize=(8.3, 5.3))
+    # axes = fig.subplots(1, 2, sharex=True, sharey=True).ravel().tolist()
     all_params = [
         {"filepath": "input/trend_2013-2018_slope.tif", "title": "2013–2018", "coast": coasts.loc["13_18"]},
         {"filepath": "input/trend_2019-2024_slope_tcorr.tif", "title": "2019–2024", "coast": coasts.loc["19_24"]},
@@ -24,32 +123,109 @@ def dhdt_overview_fig(show: bool = True):
             img = DHDT_SM.to_rgba(raster.read(1, masked=True).astype("float32").filled(0) * scale)
             ocean = rasterio.features.rasterize((params["coast"].geometry,), out_shape=(raster.height, raster.width), fill=0, transform=raster.transform) == 0
             img[ocean, :] = 1.0
-            axes[i].imshow(img, extent=(raster.bounds.left, raster.bounds.right, raster.bounds.bottom, raster.bounds.top))
-        axes[i].set_xlim(4e5, 7.4e5)
-        axes[i].set_ylim(8.5e6, 8.95e6)
-        axes[i].set_xlabel("Easting (m; UTM 33N)")
-        axes[i].set_title(params["title"])
-        axes[i].ticklabel_format(scilimits=(0, 0))
+            map_axes[i].imshow(img, extent=(raster.bounds.left, raster.bounds.right, raster.bounds.bottom, raster.bounds.top))
+        map_axes[i].set_xlim(xmin, xmax)
+        map_axes[i].set_ylim(ymin, ymax)
+        map_axes[i].set_aspect("equal")
+        map_axes[i].set_axis_off()
+        map_axes[i].text(0.15, 0.98, params["title"], transform=map_axes[i].transAxes, fontsize=12, va="top")
+        map_axes[i].ticklabel_format(scilimits=(0, 0))
 
-    def add_inset(axis, left=0.6):
-        inset = axis.inset_axes((left, 0.02, 0.1, 0.15))
+        if i == 0:
+            scale_km = 100
+            scale_xmax = map_axes[i].get_xlim()[1] - 1e4
+            scale_y = map_axes[i].get_ylim()[0] + 7e4
+            map_axes[i].plot([scale_xmax - scale_km * 1000, scale_xmax], [scale_y] * 2, color="#555")
+            for label, xcoord in [
+                ("0 km", scale_xmax - scale_km * 1000),
+                (f"{scale_km} km", scale_xmax),
+            ]:
+                map_axes[i].text(
+                    xcoord,
+                    scale_y - 3e3,
+                    label,
+                    transform=map_axes[i].transData,
+                    fontsize=8,
+                    ha="center",
+                    va="top",
+                    color="#555",
+                )
+                map_axes[i].plot([xcoord] * 2, [scale_y, scale_y + 1e4], color="#555")
+            
+
+    def add_inset_cbar(axis, left=0.6):
+        inset = axis.inset_axes((left, 0.08, 0.1, 0.15))
         cbar = plt.colorbar(DHDT_SM, cax=inset, pad=0.02, extend="both")
         text2 = plt.text(1.15, 0.5, "m a$^{-1}$", ha="left", va="center", transform=inset.transAxes)
         cbar.set_ticks([DHDT_NORMALIZER.vmin, DHDT_NORMALIZER.vmax], labels=[f"≤{DHDT_NORMALIZER.vmin:.0f}", f"≥{DHDT_NORMALIZER.vmax:.0f}"])
         return [text2, inset]
 
-    inset_items = add_inset(axes[1])
-    axes[0].set_ylabel("Northing (m; UTM 33N)")
-    plt.subplots_adjust(left=0.09, bottom=0.09, right=0.98, top=0.95, wspace=0.1)
+    inset_items = add_inset_cbar(map_axes[1])
+
+    glacier_zones.plot(color=glacier_zones["color"], ax=zone_inset)
+    zone_inset.set_xticks([])
+    zone_inset.set_yticks([])
+    for label, zone in glacier_zones.iterrows():
+            text_kwargs = {
+                "ha": "center",
+                "va": "center",
+                "path_effects": [matplotlib.patheffects.withStroke(foreground="black", linewidth=1)],
+                "color": "white",
+            }
+
+            zone_inset.annotate(str(label), (zone.geometry.centroid.x, zone.geometry.centroid.y),fontsize=8, **text_kwargs)
+
+
+    for i, (label, zone) in enumerate(zone_meta.iterrows()):
+        if pd.isna(zone["zone_name"]):
+            continue
+        axis: plt.Axes = ax_small[i]
+        axis.set_title(str(zone["zone_name"]).replace(" / ", " /\n"), fontsize=8)
+
+        for interval in intervals:
+            d = per_zone[interval.interval.short][label]
+            if d.empty:
+                continue
+
+            color = DHDT_SM.to_rgba(1.0 if interval.interval.short == "13_18" else -1.0)
+            axis.errorbar(d.index, d[f"{interval.interval.short}_med"], d[f"{interval.interval.short}_nmad"], color=color, alpha=0.5, fmt="none")
+
+            axis.scatter(d.index, d[f"{interval.interval.short}_med"], marker="s", edgecolor="#777", color=color, label=interval.interval.display_label)
+
+        xlim = axis.get_xlim()
+        axis.hlines(0, *xlim, color="#777", linestyles="--", alpha=0.5)
+        axis.set_xlim(xlim)
+        axis.set_ylim(-4.2, 0.99)
+
+        axis.set_xticks([0, 750 if xlim[1] > 1000. else 500])
+
+        if i == 0:
+            axis.set_ylabel("dH dt$^{-1}$ (m a$^{-1}$)", labelpad=0)
+        # if col >= ncols:
+        #     axis.set_xlabel("Elevation (m a.s.l.)")
+        if i == (len(zone_meta) - 2):
+            axis.legend(fontsize=7,
+                # labelspacing=0.2,     # Reduces vertical space between rows
+                handletextpad=0.2,    # Reduces horizontal space between icon and text
+                borderaxespad=0.4,    # Reduces space between legend border and axes
+                handlelength=1.5,      # Shortens the length of the legend lines
+                loc="lower right")
+    fig.text(0.5, 0.005, "Elevation (m a.s.l.)", ha="center", va="bottom", transform=fig.transFigure, fontsize=10)
+
+    # axes[0].set_ylabel("Northing (m; UTM 33N)")
+    plt.subplots_adjust(left=0.09, bottom=0.09, right=0.9, top=0.95, wspace=0)
     out_path = "figures/perinterval_slope_overview.svg"
     plt.savefig(out_path, dpi=400)
     svg_png_to_jpg(out_path)
+
+
+    return
     for axis in axes:
         axis.set_xlim(614000, 740000)
         axis.set_ylim(8790000, 8950000)
     for item in inset_items:
         item.remove()
-    add_inset(axes[1], left=0.75)
+    add_inset_cbar(axes[1], left=0.75)
     out_path2 = "figures/perinterval_slope_austfonna.svg"
     plt.savefig(out_path2, dpi=400)
     svg_png_to_jpg(out_path2)
