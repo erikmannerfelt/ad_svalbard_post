@@ -3,6 +3,7 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import matplotlib.patheffects
 import pandas as pd
+import numpy as np
 
 from .. import outlines
 from .. import statistics
@@ -15,6 +16,10 @@ def dhdt_overview_fig(show: bool = True):
 
     coasts = outlines.make_coastline_intervals()
     glacier_zones = outlines.refine_glacier_zones().drop(labels=["K"])
+
+    # glacier_zones.loc["S", "color"] = "#7b3294"
+    # glacier_zones.loc["B", "color"] = "#855b78"
+
 
     data = statistics.compute_hypsometric_profiles()
     zone_meta = data["zone_meta"].drop(index="K", errors="ignore")
@@ -176,6 +181,9 @@ def dhdt_overview_fig(show: bool = True):
             zone_inset.annotate(str(label), (zone.geometry.centroid.x, zone.geometry.centroid.y),fontsize=8, **text_kwargs)
 
 
+    if zone_meta.index[-1] == "B":
+        zone_meta = zone_meta.iloc[np.r_[np.arange(zone_meta.shape[0] - 2), [-1, -2]]]
+
     for i, (label, zone) in enumerate(zone_meta.iterrows()):
         if pd.isna(zone["zone_name"]):
             continue
@@ -203,7 +211,7 @@ def dhdt_overview_fig(show: bool = True):
             axis.set_ylabel("dH dt$^{-1}$ (m a$^{-1}$)", labelpad=0)
         # if col >= ncols:
         #     axis.set_xlabel("Elevation (m a.s.l.)")
-        if i == (len(zone_meta) - 2):
+        if i == (len(zone_meta) - 1):
             axis.legend(fontsize=7,
                 # labelspacing=0.2,     # Reduces vertical space between rows
                 handletextpad=0.2,    # Reduces horizontal space between icon and text
