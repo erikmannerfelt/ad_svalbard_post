@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from . import coreg, outlines, reporting, sampling, tools
+from . import coreg, gap_classifier, outlines, reporting, sampling, tools
 
 
 _PER_GLACIER_EXPORTS = [
@@ -270,6 +270,9 @@ def get_statistics():
             stats_key = "accel_start_end"
 
         all_stats["changes"][stats_key] = changes
+
+    all_stats["classifier"] = gap_classifier.get_classifier_stats()
+    gap_classifier.write_classifier_importance_table()
 
     reporting.write_statistics_outputs(all_stats)
     return all_stats
