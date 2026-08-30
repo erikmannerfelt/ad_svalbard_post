@@ -34,7 +34,7 @@ def _nanmean_or_warn(values: np.ndarray, *, rgi_id: str, glac_name: str, interva
     return float(np.nanmean(values))
 
 
-def sample_rasters(redo: bool = False, overview_level: int | None = 3, use_tqdm: bool = True) -> gpd.GeoDataFrame:
+def sample_rasters(redo: bool = False, overview_level: int | None = 2, use_tqdm: bool = True) -> gpd.GeoDataFrame:
     cache_path = CACHE_DIR / "outlines_sampled.arrow"
 
     if cache_path.is_file() and not redo:
