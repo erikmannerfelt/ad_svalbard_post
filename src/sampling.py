@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from pathlib import Path
 import warnings
+from pathlib import Path
+from typing import Final
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import tqdm
 
-from .config import CACHE_DIR, INPUT_DIR
 from . import outlines, tools
+from .config import CACHE_DIR, INPUT_DIR
 
 
 def get_neff_model():
@@ -32,6 +33,65 @@ def _nanmean_or_warn(values: np.ndarray, *, rgi_id: str, glac_name: str, interva
         warnings.warn(f"All sampled values are NaN for {rgi_id} ({glac_name}) in {interval_short} for {key}; storing NaN.", RuntimeWarning, stacklevel=2)
         return float("nan")
     return float(np.nanmean(values))
+
+
+#: The rate raster each interval's coverage is measured against, matching the products
+#: `sample_rasters()` samples (2019-2024 uses the temporally bias-corrected variant).
+_COVERAGE_RASTER_KIND: Final[dict[str, str]] = {
+    "13_18": "slope",
+    "19_24": "slope_tcorr",
+    "13_24": "slope",
+}
+
+
+def compute_coverage_fractions(overview_level: int | None = 2) -> dict[str, float]:
+    """Fraction of each interval's glacierized area that carries a valid fitted rate.
+
+    This is the `observational_coverage_percentage` of the GlaMBIE-2 submission: the
+    share of pixels inside the period-specific outlines where the trend fit produced a
+    value. It is derived rather than stored because it is cheap (seconds, at the default
+    overview) and because a hand-maintained copy silently goes stale whenever the
+    outlines change.
+
+    Returns
+    -------
+    dict
+        Percentages (0-100) keyed by `Interval.short`.
+
+    Notes
+    -----
+    No interpolation or gap-filling is applied anywhere in the pipeline, so the
+    uncovered remainder is implicitly assigned its own glacier's mean rate.
+    """
+    import rasterio
+    import rasterio.features
+
+    outlines_df = outlines.make_outlines()
+    coverage: dict[str, float] = {}
+
+    for interval in tools.iter_intervals():
+        kind = _COVERAGE_RASTER_KIND[interval.short]
+        path = INPUT_DIR / f"trend_{interval.filename_label}_{kind}.tif"
+        with rasterio.open(path, overview_level=overview_level) as raster:
+            inside = rasterio.features.rasterize(
+                [
+                    (geom, 1)
+                    for geom in outlines_df[interval.geometry_col]
+                    if geom is not None and not geom.is_empty
+                ],
+                out_shape=(raster.height, raster.width),
+                fill=0,
+                dtype="uint8",
+                transform=raster.transform,
+            ).astype(bool)
+            valid = ~raster.read(1, masked=True).mask & inside
+
+        total_px = int(inside.sum())
+        if total_px == 0:
+            raise RuntimeError(f"No glacierized pixels found for {interval.short} in {path.name}")
+        coverage[interval.short] = 100.0 * int(valid.sum()) / total_px
+
+    return coverage
 
 
 def sample_rasters(redo: bool = False, overview_level: int | None = 2, use_tqdm: bool = True) -> gpd.GeoDataFrame:
