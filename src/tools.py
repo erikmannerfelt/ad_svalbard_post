@@ -84,7 +84,7 @@ def pandas_str_to_interval(istr: str) -> float | pd.Interval:
     left, right = map(float, istr[1:-1].split(","))
     try:
         return pd.Interval(left, right, closed)
-    except Exception:
+    except ValueError:  # left > right: not a valid interval
         return np.nan
 
 

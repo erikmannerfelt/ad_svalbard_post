@@ -119,7 +119,7 @@ def write_submission_csv(
     `date` names the output file (the submission date) and defaults to today;
     it does not affect any interval boundary.
     """
-    date = date or datetime.date.today()
+    date = date or datetime.datetime.now().astimezone().date()
     out_path = TABLE_DIR / f"mannerfelt_glambie2_{date:%Y%m%d}.csv"
     out_path.write_text("\n".join(build_submission_lines(stats)) + "\n")
     return out_path

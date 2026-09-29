@@ -143,7 +143,6 @@ def sample_rasters(redo: bool = False, overview_level: int | None = 2, use_tqdm:
             rasterized_by_short[interval.short] = rasterized[~periglacial]
             periglacial_by_short[interval.short] = periglacial
             res_by_short[interval.short] = raster.res[0]
-            transform = raster.transform
             crs = raster.crs
             base_shape = (raster.height, raster.width)
             base_bounds = raster.bounds
