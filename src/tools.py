@@ -1,15 +1,20 @@
 from __future__ import annotations
 
-import collections.abc
 import io
 import zipfile
 from dataclasses import dataclass
-from pathlib import Path
+from typing import Literal, TypeAlias
 
 import numpy as np
 import pandas as pd
 
 from .config import INPUT_DIR
+
+#: Cache-invalidation mode shared by every derived-cache API in this package.
+#: ``False`` uses an existing cache; ``"self"`` recomputes only the current artifact
+#: while dependencies keep theirs; ``"all"`` recomputes the current artifact and
+#: propagates ``"all"`` through derived-cache dependencies.
+ForceRedo: TypeAlias = Literal[False, "self", "all"]
 
 
 @dataclass(frozen=True)

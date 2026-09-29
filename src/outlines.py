@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-import shapely.ops
+from pathlib import Path
+
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import tqdm
+import shapely.ops
 
-from .config import CACHE_DIR, CRS_EPSG
 from . import tools
+from .config import CACHE_DIR, CRS_EPSG
+from .tools import ForceRedo
 
 
 def surge_overlaps_interval(term_value, onset_value, min_year, max_year) -> bool:
@@ -42,10 +44,30 @@ def surge_overlaps_interval(term_value, onset_value, min_year, max_year) -> bool
     return False
 
 
-def make_coastline_intervals() -> gpd.GeoDataFrame:
+def _write_feather_atomic(frame: gpd.GeoDataFrame, cache_path: Path) -> None:
+    """Serialize to a temporary sibling, then atomically install it at `cache_path`.
+
+    These caches take minutes to rebuild, so an interrupted write must not be able to
+    leave a truncated file that later looks usable. The suffix stays `.arrow` because
+    the serializer infers its format from it.
+    """
+    tmp_path = cache_path.with_suffix(f".tmp{cache_path.suffix}")
+    try:
+        frame.to_feather(tmp_path)
+        tmp_path.replace(cache_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def make_coastline_intervals(force_redo: ForceRedo = False) -> gpd.GeoDataFrame:
+    """Union the annual coastlines into one land polygon per interval.
+
+    The union is the *maximum* land extent over the interval, so for a retreating
+    tidewater front it is effectively the extent at the start of the interval.
+    """
     cache_path = CACHE_DIR / "coastline_intervals.arrow"
 
-    if cache_path.is_file():
+    if cache_path.is_file() and not force_redo:
         return gpd.read_feather(cache_path).set_index("key")  # type: ignore
 
     coastlines = {}
@@ -80,22 +102,109 @@ def make_coastline_intervals() -> gpd.GeoDataFrame:
 
     out = gpd.GeoDataFrame(pd.DataFrame.from_records(records), geometry="geometry", crs=CRS_EPSG)
 
-    out.to_feather(cache_path)
+    _write_feather_atomic(out, cache_path)
 
     return gpd.read_feather(cache_path).set_index("key")  # type: ignore
 
 
-def make_outlines(redo: bool = False):
+def _read_outline_cache(cache_path: Path) -> gpd.GeoDataFrame:
+    """Read the outline cache and derive the per-interval areas from its geometries.
+
+    Areas are derived on read rather than stored so they cannot silently disagree with
+    the geometries they came from.
+    """
+    out = gpd.read_feather(cache_path)
+    for interval in tools.iter_intervals():
+        out[interval.area_col] = out[interval.geometry_col].area
+    return out  # type: ignore[return-value]
+
+
+def _validate_corrections(
+    corrections: gpd.GeoDataFrame,
+    rgi7: gpd.GeoDataFrame,
+    probably_tidewater: pd.Series,
+) -> None:
+    """Check each correction against what the pipeline will actually do with it.
+
+    Two failure modes are worth catching before a multi-minute rebuild:
+
+    1. An `rgi_id` that matches no RGI 7.0 outline. The correction would silently do
+       nothing, which is indistinguishable from it having been applied.
+    2. A `tidewater_extension` whose target is excluded from the coastline clip by
+       `probably_tidewater`. Its seaward part would then be unioned in *literally*
+       rather than trimmed back to the coastline, inventing ice over open water. See
+       `make_outlines` for why the two fix types are treated differently.
+    """
+    known = set(rgi7["rgi_id"])
+    unknown = sorted(set(corrections["rgi_id"]) - known)
+    if unknown:
+        raise RuntimeError(f"outline_corrections.geojson targets unknown rgi_id(s): {unknown}")
+
+    clipped = set(rgi7.loc[probably_tidewater, "rgi_id"])
+    unclipped_domains = sorted(
+        corrections.loc[
+            corrections["fix_type"].str.contains("tidewater_extension")
+            & ~corrections["rgi_id"].isin(clipped),
+            "rgi_id",
+        ]
+    )
+    if unclipped_domains:
+        raise RuntimeError(
+            "tidewater_extension targets that are not coastline-clipped, so their seaward "
+            f"part would be added literally: {unclipped_domains}"
+        )
+
+
+def make_outlines(force_redo: ForceRedo = False) -> gpd.GeoDataFrame:
+    """Build period-specific glacier outlines from RGI 7.0, corrections and annual coastlines.
+
+    Returns one geometry per glacier per interval (``geometry_13_18`` etc.), each being the
+    RGI 7.0 outline with any active corrections from ``shapes/outline_corrections.geojson``
+    applied, then — for glaciers that are or may be tidewater — clipped to the union of that
+    interval's annual coastlines.
+
+    The two extension types mean different things
+    ---------------------------------------------
+    ``land_extension`` is a **literal union**: the polygon delineates ice to add, and must be
+    drawn tightly to it, because every square metre inside it is added to the target.
+
+    ``tidewater_extension`` is an **attribution domain**: the polygon marks the region within
+    which land that the coastline says exists should be attributed to the target, wherever
+    the coastline extends beyond the RGI 7.0 outline. It does not delineate ice, and is drawn
+    deliberately large — typically well out over open water.
+
+    Both are applied by the same union below; what separates them is the coastline clip that
+    follows. For a tidewater target the union is temporary and generous (the target briefly
+    extends over ocean and over its own existing area), and the clip trims it back to exactly
+    the land inside the domain.
+
+    The practical consequence for a ``tidewater_extension`` is that a huge polygon adding
+    almost no area is the expected outcome, not a sign the correction failed: most of a domain
+    either already lies inside the target's own outline, or lies seaward of every annual
+    coastline in the interval and is clipped away — correctly, since nothing was ice there in
+    any year. Concretely, the 29 domains added on 2026-09-05 span 600 km² of polygon and
+    changed total glacier area by +5.5 km², none of it taken from another glacier.
+
+    Nothing in the mechanism ties a ``fix_type`` to the clip, though — the clip depends on the
+    *target* satisfying ``probably_tidewater``, not on how the polygon was labelled. A domain
+    drawn for a land-terminating glacier would therefore have its seaward part added
+    literally, inventing ice over open water. ``_validate_corrections`` rejects that case
+    rather than leaving it to be noticed downstream.
+
+    Parameters
+    ----------
+    force_redo
+        ``False`` reads ``cache/rgi7_outlines.arrow``; ``"self"`` recomputes these outlines
+        while reusing the cached coastline intervals; ``"all"`` also rebuilds those. A full
+        rebuild takes a few minutes.
+    """
     cache_path = CACHE_DIR / "rgi7_outlines.arrow"
     intervals = tools.iter_intervals()
 
-    if cache_path.is_file() and not redo:
-        out = gpd.read_feather(cache_path)
-        for interval in intervals:
-            out[interval.area_col] = out[interval.geometry_col].area
-        return out
+    if cache_path.is_file() and not force_redo:
+        return _read_outline_cache(cache_path)
 
-    coasts = make_coastline_intervals()
+    coasts = make_coastline_intervals(force_redo="all" if force_redo == "all" else False)
 
     rgi7_orig = gpd.read_file("zip://input/RGI_V7_Surge_Database.zip/RGI_V7_Surge_Database/RGI2000-v7.0-G-07_svalbard_jan_mayen_Surge_Database.shp").to_crs(CRS_EPSG)
     rgi7_orig["geometry"] = rgi7_orig["geometry"].buffer(0)
@@ -146,7 +255,9 @@ def make_outlines(redo: bool = False):
         raise RuntimeError(f"Problematic zone assignment. Matched none or too many zones. Missing: {missing}")
 
     outline_corrections = gpd.read_file("shapes/outline_corrections.geojson")
-    outline_corrections["is_extension"] = outline_corrections["fix_type"].str.contains("partition_override")
+    # Sort key: extensions (False) apply first, partition overrides (True) land on top.
+    outline_corrections["is_partition_override"] = outline_corrections["fix_type"].str.contains("partition_override")
+    _validate_corrections(outline_corrections, rgi7_orig, probably_tidewater)
 
     outlines_df = rgi7_orig[base_cols].drop(columns=["geometry"]).copy()
     outlines_df[["zone_label", "zone_name"]] = zone_matches[["zone_label", "zone_name"]].to_numpy()
@@ -157,28 +268,25 @@ def make_outlines(redo: bool = False):
         rgi7 = rgi7_orig.copy()
         rgi7["modified"] = False
 
-        active_corrections = outline_corrections.loc[~((outline_corrections["first_active_year"] > interval.end_year) | (outline_corrections["last_active_year"] < interval.start_year))].sort_values(["is_extension", "priority"])
+        active_corrections = outline_corrections.loc[~((outline_corrections["first_active_year"] > interval.end_year) | (outline_corrections["last_active_year"] < interval.start_year))].sort_values(["is_partition_override", "priority"])
         for _, item in active_corrections.iterrows():
-            outline_idx = rgi_id_to_idx.get(item["rgi_id"])
-            if outline_idx is None:
-                continue
+            target_idx = rgi_id_to_idx[item["rgi_id"]]
 
-            outline_idx = [outline_idx]
-            if len(outline_idx) != 1:
-                raise RuntimeError(f"Problematic correction. Matched none or too many indexes.\n{item}")
-
+            # `overlaps` is deliberately strict: a correction wholly inside another glacier
+            # is not a partition of it and must not be cut out of it.
             overlaps = pd.Series(False, index=rgi7.index)
-            try:
-                candidate_idx = rgi7.sindex.query(item["geometry"], predicate="intersects")
-                if len(candidate_idx):
-                    overlaps.loc[candidate_idx] = rgi7.loc[candidate_idx, "geometry"].overlaps(item["geometry"]).to_numpy()
-            except Exception:
-                overlaps = rgi7["geometry"].overlaps(item["geometry"])
+            candidate_idx = rgi7.sindex.query(item["geometry"], predicate="intersects")
+            if len(candidate_idx):
+                overlaps.loc[candidate_idx] = rgi7.loc[candidate_idx, "geometry"].overlaps(item["geometry"]).to_numpy()
+
             rgi7.loc[overlaps, "geometry"] = rgi7.loc[overlaps, "geometry"].difference(item["geometry"])
-            rgi7.loc[outline_idx[0], "geometry"] = rgi7.loc[outline_idx[0], "geometry"].union(item["geometry"])
+            rgi7.loc[target_idx, "geometry"] = rgi7.loc[target_idx, "geometry"].union(item["geometry"])
             rgi7.loc[overlaps, "modified"] = True
 
-        # Keep only the coastline-constrained geometries for glaciers that are likely tidewater.
+        # Clip back to the coastline. This is what turns the unioned correction domains
+        # above into an attribution rule (see the docstring): whatever land the coastline
+        # places inside a domain stays with the target, and the rest of the domain — ocean,
+        # or area the target already held — contributes nothing.
         orig_area = rgi7.loc[probably_tidewater, "geometry"].area
         clipped = rgi7.loc[probably_tidewater, "geometry"].intersection(coastline["geometry"])
         coast_modified = (orig_area - clipped.area) > 1.
@@ -189,27 +297,26 @@ def make_outlines(redo: bool = False):
         outlines_df[interval.surging_col] = [surge_overlaps_interval(term_value, onset_value, interval.start_year, interval.end_year) for term_value, onset_value in zip(rgi7["S_Term"], rgi7["S_Onset"])]
 
     outlines_df = gpd.GeoDataFrame(outlines_df, geometry=tools.get_interval("13_24").geometry_col, crs=CRS_EPSG)
-    for interval in intervals:
-        outlines_df[interval.area_col] = outlines_df[interval.geometry_col].area
 
-    outlines_df.to_feather(cache_path)
+    _write_feather_atomic(outlines_df, cache_path)
 
-    return outlines_df
+    return _read_outline_cache(cache_path)
 
 
-def refine_glacier_zones(redo: bool = False):
+def refine_glacier_zones(force_redo: ForceRedo = False) -> gpd.GeoDataFrame:
+    """Clip the glacier zones to the mainland coastlines, dropping small offshore slivers."""
     cache_path = CACHE_DIR / "refined_glacier_zones.arrow"
 
-    if cache_path.is_file() and not redo:
+    if cache_path.is_file() and not force_redo:
         return gpd.read_feather(cache_path)
 
     glacier_zones = gpd.read_file("shapes/glacier_zones.geojson").set_index("zone_label")
-    coasts = make_coastline_intervals().loc[["13_24"]].explode().to_crs(glacier_zones.crs)
+    coasts = make_coastline_intervals(force_redo="all" if force_redo == "all" else False).loc[["13_24"]].explode().to_crs(glacier_zones.crs)
     coasts = coasts[coasts.geometry.area > 1e8]
     coasts = coasts.dissolve().simplify(100)
 
     glacier_zones.geometry = glacier_zones.geometry.intersection(coasts.geometry[0])
 
-    glacier_zones.to_feather(cache_path)
+    _write_feather_atomic(glacier_zones, cache_path)
 
     return gpd.read_feather(cache_path)
