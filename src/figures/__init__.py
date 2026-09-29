@@ -1,4 +1,13 @@
-from . import coreg, hypsometry, overview, surge, timeseries, uncertainty, zonal
+from . import (
+    coreg,
+    coverage,
+    hypsometry,
+    overview,
+    surge,
+    timeseries,
+    uncertainty,
+    zonal,
+)
 
 
 def make_all_figures(show: bool = False):
@@ -7,6 +16,12 @@ def make_all_figures(show: bool = False):
 
     print("Generating vertcoreg summary figure")
     coreg.plot_vertcoreg_summary(show=show)
+
+    print("Generating annual DEM count figure")
+    coverage.plot_annual_dem_count(show=show)
+
+    print("Generating per-pixel source map")
+    coverage.plot_source_map(show=show)
 
     print("Generating terrain error figure")
     uncertainty.plot_terrain_err(show=show)

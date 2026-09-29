@@ -8,6 +8,7 @@ import pandas as pd
 from . import (
     comparisons,
     coreg,
+    coverage,
     gap_classifier,
     outlines,
     reporting,
@@ -500,6 +501,8 @@ def get_statistics():
     all_stats["submarine"], all_stats["tmb"] = _get_submarine_and_tmb_stats(
         all_stats["changes"], sampled
     )
+
+    all_stats["coverage"] = coverage.get_coverage_stats()
 
     all_stats["comparisons"] = comparisons.get_comparisons(all_stats["changes"])
     comparisons.write_comparison_table(all_stats["changes"])
