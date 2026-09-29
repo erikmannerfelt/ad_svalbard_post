@@ -98,9 +98,18 @@ def get_comparisons(
 #: Rows of the Supporting Information comparison table, in the order they appear.
 #: Numbers are pulled from each module so the table cannot drift from the analysis;
 #: the comparability note is prose that is not derivable and so is stated here.
+#: ``period`` is the span of the source dataset, whereas ``rate_period`` is the window
+#: the tabulated rate refers to. The two differ where a module evaluates an annual or
+#: multi-period series over our own intervals, so the rate is labeled with its window
+#: rather than silently inheriting the dataset span. ``summary``, ``rate_key`` and
+#: ``rate_err_key`` name the module summary and its fields; empty means not tabulated.
 TABLE_SOURCES: Final[tuple[dict[str, str], ...]] = (
     {
         "citation": r"\citet{morris_spread_2020}",
+        "summary": "morris",
+        "rate_key": "total_mass_rate",
+        "rate_err_key": "total_mass_rate_err",
+        "rate_period": "2011--2017",
         "period": "2011--2017",
         "method": "CryoSat-2 SARIn swath altimetry, 1~km$^2$ plane fits",
         "density": r"\textbf{850$\pm$60} (as ours)",
@@ -113,6 +122,10 @@ TABLE_SOURCES: Final[tuple[dict[str, str], ...]] = (
     },
     {
         "citation": r"\citet{hugonnet_accelerated_2021}",
+        "summary": "hugonnet",
+        "rate_key": "mass_rate_start_mid",
+        "rate_err_key": "",
+        "rate_period": "2013--2018",
         "period": "2000--2020",
         "method": "ASTER stereo DEMs, gap-interpolated, temporally regularised",
         "density": r"\textbf{850} (as ours)",
@@ -123,6 +136,10 @@ TABLE_SOURCES: Final[tuple[dict[str, str], ...]] = (
     },
     {
         "citation": r"\citet{dussaillant_annual_2025}",
+        "summary": "wgmsamce",
+        "rate_key": "mass_rate_start_end",
+        "rate_err_key": "sigma_start_end",
+        "rate_period": "2013--2024",
         "period": "1976--2025",
         "method": "Temporal downscaling of geodetic data with in-situ observations",
         "density": r"\textbf{850$\pm$60}",
@@ -133,6 +150,10 @@ TABLE_SOURCES: Final[tuple[dict[str, str], ...]] = (
     },
     {
         "citation": r"\citet{wang_accelerated_2022}",
+        "summary": "wang",
+        "rate_key": "mass_rate_headline",
+        "rate_err_key": "",
+        "rate_period": "2019--2021",
         "period": "2.24~a from 29 Mar 2019",
         "method": "ICESat-2 ATL11 altimetry, hypsometric extrapolation",
         "density": r"\textbf{600 effective} (zonal firn/ice)",
@@ -143,6 +164,10 @@ TABLE_SOURCES: Final[tuple[dict[str, str], ...]] = (
     },
     {
         "citation": r"\citet{geyman_historical_2022}",
+        "summary": "geyman",
+        "rate_key": "observed_mass_rate",
+        "rate_err_key": "",
+        "rate_period": "1936--2010",
         "period": "1936--2010",
         "method": "Historical aerial photogrammetry vs.\\ modern DEM",
         "density": r"850$\pm$60",
@@ -153,6 +178,10 @@ TABLE_SOURCES: Final[tuple[dict[str, str], ...]] = (
     },
     {
         "citation": r"\citet{schuler_reconciling_2020}",
+        "summary": "",
+        "rate_key": "",
+        "rate_err_key": "",
+        "rate_period": "",
         "period": "2000--2019",
         "method": "Upscaling of 12 in-situ records",
         "density": "n/a (not geodetic)",
@@ -163,6 +192,10 @@ TABLE_SOURCES: Final[tuple[dict[str, str], ...]] = (
     },
     {
         "citation": r"\citet{malecki_recent_2022}",
+        "summary": "",
+        "rate_key": "",
+        "rate_err_key": "",
+        "rate_period": "",
         "period": "2011--2017",
         "method": "ArcticDEM DEM differencing",
         "density": "890$\\pm$20 / 550$\\pm$50",
@@ -174,23 +207,20 @@ TABLE_SOURCES: Final[tuple[dict[str, str], ...]] = (
 )
 
 
-def _format_rate(summary: dict[str, object]) -> str:
-    """Best available headline rate for one source, as a LaTeX cell."""
+def _format_rate(summary: dict[str, object], source: dict[str, str]) -> str:
+    """Tabulated rate for one source, as a LaTeX cell labeled with its window.
+
+    The rate and its error are read from the fields named in ``source``, so an
+    error is never attached to a rate from a different window.
+    """
+    if not source["rate_key"]:
+        return "---"
     if "unavailable" in summary:
         return r"\emph{unavailable}"
-    for key, unit in (
-        ("total_mass_rate", "Gt~a$^{-1}$"),
-        ("mass_rate_start_end", "Gt~a$^{-1}$"),
-        ("mass_rate_start_mid", "Gt~a$^{-1}$"),
-        ("observed_mass_rate", "Gt~a$^{-1}$"),
-        ("mass_rate_headline", "Gt~a$^{-1}$"),
-    ):
-        if key in summary:
-            error = summary.get(f"{key}_err") or summary.get("sigma_start_end")
-            if error is not None:
-                return f"${summary[key]}\\pm{error}$~{unit}"
-            return f"${summary[key]}$~{unit}"
-    return "---"
+    value = summary[source["rate_key"]]
+    error = summary.get(source["rate_err_key"]) if source["rate_err_key"] else None
+    number = f"${value}\\pm{error}$" if error is not None else f"${value}$"
+    return f"{number}~Gt~a$^{{-1}}$ ({source['rate_period']})"
 
 
 def write_comparison_table(changes: dict[str, object] | None = None) -> Path:
@@ -201,7 +231,6 @@ def write_comparison_table(changes: dict[str, object] | None = None) -> Path:
     :data:`TABLE_SOURCES`, because it is not derivable from the data.
     """
     summaries = get_comparisons(changes)
-    keys = ["morris", "hugonnet", "wgmsamce", "wang", "geyman", None, None]
     lines = [
         "% Autogenerated by src.comparisons.write_comparison_table -- do not edit.",
         r"\begin{tabular}{p{2.7cm}p{1.9cm}p{3.4cm}p{2.0cm}p{2.6cm}p{4.4cm}}",
@@ -212,9 +241,9 @@ def write_comparison_table(changes: dict[str, object] | None = None) -> Path:
         ),
         r"\hline",
     ]
-    for source, key in zip(TABLE_SOURCES, keys, strict=True):
-        summary = summaries.get(key, {}) if key else {}
-        rate = _format_rate(summary) if key else "---"
+    for source in TABLE_SOURCES:
+        summary = summaries.get(source["summary"], {}) if source["summary"] else {}
+        rate = _format_rate(summary, source)
         lines.append(
             f"{source['citation']} & {source['period']} & {source['method']} & "
             f"{rate} & {source['density']} & {source['note']} \\\\"

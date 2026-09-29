@@ -210,9 +210,11 @@ def sample_rasters(redo: bool = False, overview_level: int | None = 2, use_tqdm:
     # for key in base_keys:
     #     outlines_df[[f"{key}_baseline_err_unscaled", f"{key}_fit_err", f"{key}_excess_err"]] *= 2
 
+    # The sub-period midpoints are six years apart. The errors must be divided by the
+    # same six as the value, or the acceleration uncertainty is inflated sixfold.
     outlines_df["accel_13_24"] = (outlines_df["slope_19_24"] - outlines_df["slope_13_18"]) / 6
     for err_col in ["baseline_err_unscaled", "fit_err", "excess_err"]:
-        outlines_df[f"accel_13_24_{err_col}"] = np.hypot(outlines_df[f"slope_13_18_{err_col}"], outlines_df[f"slope_19_24_{err_col}"])
+        outlines_df[f"accel_13_24_{err_col}"] = np.hypot(outlines_df[f"slope_13_18_{err_col}"], outlines_df[f"slope_19_24_{err_col}"]) / 6
 
     for key in ["accel_13_24", *base_keys]:
         key_to_interval = tools.key_to_interval(key)
