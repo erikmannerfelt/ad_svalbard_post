@@ -119,7 +119,7 @@ def dhdt_overview_fig(show: bool = True):
     # axes = fig.subplots(1, 2, sharex=True, sharey=True).ravel().tolist()
     all_params = [
         {"filepath": "input/trend_2013-2018_slope.tif", "title": "2013–2018", "coast": coasts.loc["13_18"]},
-        {"filepath": "input/trend_2019-2024_slope_tcorr.tif", "title": "2019–2024", "coast": coasts.loc["19_24"]},
+        {"filepath": "input/trend_2019-2024_slope.tif", "title": "2019–2024", "coast": coasts.loc["19_24"]},
     ]
     for i, params in enumerate(all_params):
 

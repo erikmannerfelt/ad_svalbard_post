@@ -36,10 +36,11 @@ def _nanmean_or_warn(values: np.ndarray, *, rgi_id: str, glac_name: str, interva
 
 
 #: The rate raster each interval's coverage is measured against, matching the products
-#: `sample_rasters()` samples (2019-2024 uses the temporally bias-corrected variant).
+#: `sample_rasters()` samples. The suffix-less 2019-2024 raster is the temporally
+#: bias-corrected one; the uncorrected variant is `trend_2019-2024_slope_uncorr.tif`.
 _COVERAGE_RASTER_KIND: Final[dict[str, str]] = {
     "13_18": "slope",
-    "19_24": "slope_tcorr",
+    "19_24": "slope",
     "13_24": "slope",
 }
 
@@ -111,7 +112,7 @@ def sample_rasters(redo: bool = False, overview_level: int | None = 2, use_tqdm:
 
     interval_raster_kinds = [
         (tools.get_interval("13_18"), "slope"),
-        (tools.get_interval("19_24"), "slope_tcorr"),
+        (tools.get_interval("19_24"), "slope"),
         (tools.get_interval("13_24"), "slope"),
     ]
     rasterized_by_short = {}
@@ -121,13 +122,13 @@ def sample_rasters(redo: bool = False, overview_level: int | None = 2, use_tqdm:
     base_keys = []
 
     for interval, kind in interval_raster_kinds:
-        base_key = f"{kind.replace('_tcorr', '')}_{interval.short}"
+        base_key = f"{kind}_{interval.short}"
         base_keys.append(base_key)
 
         paths = {
             base_key: Path(f"input/trend_{interval.filename_label}_{kind}.tif"),
         }
-        paths[base_key + "_baseline_err_unscaled"] = paths[base_key].parent / f"trend_{interval.filename_label}_{kind.replace('_tcorr', '')}_baseline_err.tif"
+        paths[base_key + "_baseline_err_unscaled"] = paths[base_key].parent / f"trend_{interval.filename_label}_{kind}_baseline_err.tif"
         paths[base_key + "_fit_err"] = paths[base_key].parent / f"trend_{interval.filename_label}_{kind}_fit_err.tif"
         data_by_short[interval.short] = {}
 
