@@ -65,7 +65,7 @@ def plot_annual_dem_count(show: bool = False) -> None:
             interpolation="nearest",
         )
         valid = glaciers & (count > 0)
-        glacier_doy = doy[valid & (doy >= coverage.MIN_VALID_DOY)]
+        glacier_doy = doy[valid]
         axis.set_title(str(year), fontsize=9, loc="left")
         axis.text(
             0.98,

@@ -8,10 +8,11 @@ Information: the per-year coverage (Figure S1), the source fractions and map
 (Text S5, Figure S4), and the bias that the uneven acquisition season can introduce
 into integer-year trends (Text S1).
 
-The rasters' own overviews are average-resampled, which corrupts categorical and
-day-of-year values (26% of 2018 overview DOYs fall below day 60, against 0.15% at full
-resolution), so the sampling reads full-resolution blocks and keeps every
-``SAMPLE_STRIDE``-th pixel instead.
+The rasters' own overviews are average-resampled, which blends categorical and
+day-of-year values, so the sampling reads full-resolution blocks and keeps every
+``SAMPLE_STRIDE``-th pixel instead. The ``doy`` rasters must be the repaired ones
+(true day of year, 0 where ``count`` is 0; see ``adsvalbard.doy`` in
+``processing_ADSvalbard``), not the legacy ``month * 30 + day`` encoding.
 """
 
 from pathlib import Path
@@ -44,9 +45,6 @@ QUALITY_KEYS: Final = {1: "heavy", 2: "light", 3: "biascorr", 4: "deramped"}
 #: much of a summer's surface lowering an annual median contains.
 MELT_START_DOY: Final = 152
 MELT_END_DOY: Final = 245
-#: Day-of-year values below this are not physical for optical stereo in the polar
-#: night and occur only in a few blended pixels (0.15% in 2018); they are dropped.
-MIN_VALID_DOY: Final = 60
 
 
 def _strided_read(path: Path, stride: int = SAMPLE_STRIDE) -> np.ndarray:
@@ -98,6 +96,13 @@ def sample_annual_mosaics(force_redo: tools.ForceRedo = False) -> xr.Dataset:
         for year in YEARS
     }
     paths[("quality_mode", 0)] = INPUT_DIR / "dem_quality_mode.tif"
+    for year in YEARS:
+        with rasterio.open(paths[("doy", year)]) as raster:
+            if raster.tags().get("DOY_ENCODING") != "day_of_year":
+                raise ValueError(
+                    f"{paths[('doy', year)]} is not tagged DOY_ENCODING=day_of_year; it is "
+                    "probably the legacy month * 30 + day encoding (see adsvalbard.doy)"
+                )
     keys = list(paths)
     arrays = tqdm.contrib.concurrent.thread_map(
         _strided_read,
@@ -220,7 +225,7 @@ def get_coverage_stats(force_redo: tools.ForceRedo = False) -> dict[str, object]
     for year in YEARS:
         count = dataset["count"].sel(year=year).to_numpy()[glaciers]
         doy = dataset["doy"].sel(year=year).to_numpy()[glaciers]
-        doy = doy[(count > 0) & (doy >= MIN_VALID_DOY)]
+        doy = doy[count > 0]
         rows.append(
             {
                 "year": year,
