@@ -1,10 +1,11 @@
 from . import (
     coreg,
     coverage,
+    examples,
     hypsometry,
     overview,
     surge,
-    timeseries,
+    surge_examples,
     uncertainty,
     zonal,
 )
@@ -35,6 +36,9 @@ def make_all_figures(show: bool = False):
     print("Generating post-surge anomaly figure")
     surge.plot_postsurge_anomaly_by_time(show=show)
 
+    print("Generating surge examples figure")
+    surge_examples.plot_surge_examples(show=show)
+
     print("Generating zonal dH/dt figure")
     zonal.plot_zone_dhdt_fig(show=show)
 
@@ -47,8 +51,8 @@ def make_all_figures(show: bool = False):
     print("Generating hypsometry figure")
     hypsometry.plot_hypsometric_profiles(show=show)
 
-    print("Generating point timeseries trends figure")
-    timeseries.plot_point_timeseries_trends(show=show)
+    print("Generating elevation change examples figure")
+    examples.plot_elevation_change_examples(show=show)
 
     # This figure takes time to generate, so it's nice to have that last.
     print("Generating overview dH/dt figure")

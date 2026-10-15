@@ -4,21 +4,17 @@ from typing import Final
 
 import matplotlib.colors
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MultipleLocator
 import numpy as np
 from matplotlib.lines import Line2D
-
-from .. import tools
-from ..config import FIGURE_DIR
-
+from matplotlib.ticker import MultipleLocator
 
 YEARS = list(range(2013, 2025))
 FALLBACK_2013_REFERENCE_X = 2013.49
 FALLBACK_2019_REFERENCE_X = 2019.60
 
-MM_PER_INCH: Final = 25.4
-PANEL_WIDTH_IN: Final = 60.0 / MM_PER_INCH
-PANEL_HEIGHT_IN: Final = 41.55 / MM_PER_INCH
+# Annual DEM count, saturating at 10 DEMs per year
+COUNT_CMAP: Final = plt.get_cmap("viridis")
+COUNT_NORM: Final = matplotlib.colors.Normalize(vmin=1, vmax=10)
 
 
 def parse_float(value):
@@ -48,10 +44,8 @@ def choose_major_step(ymin, ymax):
     return 100.0
 
 
-def plot_panel(row, cmap, norm) -> plt.Figure:
-    fig = plt.figure(figsize=(PANEL_WIDTH_IN, PANEL_HEIGHT_IN))
-    axis: plt.Axes = fig.add_subplot(1, 1, 1)
-
+def draw_panel(axis: plt.Axes, row, cmap, norm, marker_size: float = 20) -> None:
+    """Draw one point's annual medians, NMAD error bars and the three fitted trends."""
     xs = []
     ys = []
     yerr = []
@@ -71,7 +65,7 @@ def plot_panel(row, cmap, norm) -> plt.Figure:
     valid = np.isfinite(xs) & np.isfinite(ys)
 
     axis.errorbar(xs[valid], ys[valid], yerr=yerr[valid], fmt="none", ecolor="0.2", capsize=2, lw=0.9, alpha=0.8)
-    axis.scatter(xs[valid], ys[valid], c=cmap(norm(np.clip(counts[valid], 1, 10))), s=20, edgecolors="0.15", linewidths=0.25, zorder=3)
+    axis.scatter(xs[valid], ys[valid], c=cmap(norm(np.clip(counts[valid], 1, 10))), s=marker_size, edgecolors="0.15", linewidths=0.25, zorder=3)
 
     ref_2013_x = get_reference_x(row, 2013, FALLBACK_2013_REFERENCE_X)
     ref_2019_x = get_reference_x(row, 2019, FALLBACK_2019_REFERENCE_X)
@@ -80,7 +74,7 @@ def plot_panel(row, cmap, norm) -> plt.Figure:
     plot_trend(axis, parse_float(row.get("2013-2018_slope")), parse_float(row.get("2013-2018_intercept")), ref_2013_x, 2013.0, 2019.0, color="black")
     plot_trend(axis, parse_float(row.get("2019-2024_slope")), parse_float(row.get("2019-2024_intercept")), ref_2019_x, 2019.0, 2025.0, color="black")
 
-    axis.set_ylabel("Elevation (m a.sl.)", fontsize=7, labelpad=2)
+    axis.set_ylabel("Elevation (m a.s.l.)", fontsize=7, labelpad=2)
 
     y_min = np.nanmin(ys)
     y_max = np.nanmax(ys)
@@ -100,63 +94,10 @@ def plot_panel(row, cmap, norm) -> plt.Figure:
     axis.set_xlim(2012.5, 2024.9)
     axis.xaxis.set_major_locator(MultipleLocator(4))
 
-    fig.subplots_adjust(left=0.18, right=0.98, top=0.98, bottom=0.12)
-    return fig
 
-
-def save_panel(fig: plt.Figure, out_dir, key: str) -> None:
-    for suffix in ("png", "svg"):
-        fig.savefig(out_dir / f"{key}.{suffix}", dpi=600)
-
-
-def save_legend(out_dir) -> None:
-    legend_handles = [
+def legend_handles() -> list[Line2D]:
+    return [
         Line2D([0], [0], color="k", marker="o", lw=1, ms=4, label="Annual medians ± NMAD"),
         Line2D([0], [0], color="black", lw=1.6, label="2013–2018 / 2019–2024 trend"),
         Line2D([0], [0], color="0.65", lw=2.0, label="2013–2024 trend"),
     ]
-    fig = plt.figure(figsize=(3, 1))
-    fig.legend(handles=legend_handles, loc="center", fontsize=7, frameon=False)
-    fig.savefig(out_dir / "legend.svg", bbox_inches="tight", transparent=True)
-    plt.close(fig)
-
-
-def save_colorbar(out_dir, cmap, norm) -> None:
-    fig, cax = plt.subplots(figsize=(0.6, 1.4))
-    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
-    sm.set_array([])
-    cbar = fig.colorbar(sm, cax=cax, orientation="vertical", extend="max")
-    cbar.set_ticks([1, 10])
-    cbar.set_ticklabels(["1", "≥10"])
-    cbar.ax.tick_params(labelsize=6, length=2)
-    cbar.outline.set_linewidth(0.6)
-    cbar.set_label("Count", labelpad=-5)
-    fig.savefig(out_dir / "colorbar.svg", bbox_inches="tight", transparent=True)
-    plt.close(fig)
-
-
-def plot_point_timeseries_trends(show: bool = True):
-    data = tools.read_aux_csv("point_timeseries_trends.csv")
-
-    out_dir = FIGURE_DIR / "timeseries"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    cmap = plt.get_cmap("viridis")
-    norm = matplotlib.colors.Normalize(vmin=1, vmax=10)
-
-    figs = []
-    for _, row in data.iterrows():
-        fig = plot_panel(row, cmap, norm)
-        save_panel(fig, out_dir, row["key"])
-        if show:
-            figs.append(fig)
-        else:
-            plt.close(fig)
-
-    save_legend(out_dir)
-    save_colorbar(out_dir, cmap, norm)
-
-    if show:
-        plt.show()
-        for fig in figs:
-            plt.close(fig)
