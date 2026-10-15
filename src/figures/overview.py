@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
+import matplotlib.patches
 import matplotlib.patheffects
 import pandas as pd
 import numpy as np
@@ -15,7 +16,7 @@ def dhdt_overview_fig(show: bool = True):
     import rasterio.features
 
     coasts = outlines.make_coastline_intervals()
-    glacier_zones = outlines.refine_glacier_zones().drop(labels=["K"])
+    glacier_zones = outlines.refine_glacier_zones()
 
     # glacier_zones.loc["S", "color"] = "#7b3294"
     # glacier_zones.loc["B", "color"] = "#855b78"
@@ -29,14 +30,20 @@ def dhdt_overview_fig(show: bool = True):
     import matplotlib.pyplot as plt
 
 
-    xmin = 400_000
-    ymax = 8_950_000
-    height = 469_000
+    xmin = 402_000
+    ymax = 8_972_000
+    height = 504_000
     box_aspect = 1.38  # height / width
 
     width = height / box_aspect
     xmax = xmin + width
     ymin = ymax - height
+
+    # Kvitøya extent (glacier bounds plus a margin) and the inset's lower-left corner in map coordinates
+    kvitoya_xlim = (809_000, 848_000)
+    kvitoya_ylim = (8_930_000, 8_970_000)
+    kvitoya_anchor = (712_000, 8_928_000)
+    kvitoya_offset = (kvitoya_anchor[0] - kvitoya_xlim[0], kvitoya_anchor[1] - kvitoya_ylim[0])
 
     fig = plt.figure(figsize=(8.3, 6.6)) # TODO: GLR allows only 7.09 inch wide figures
 
@@ -128,7 +135,33 @@ def dhdt_overview_fig(show: bool = True):
             img = DHDT_SM.to_rgba(raster.read(1, masked=True).astype("float32").filled(0) * scale)
             ocean = rasterio.features.rasterize((params["coast"].geometry,), out_shape=(raster.height, raster.width), fill=0, transform=raster.transform) == 0
             img[ocean, :] = 1.0
-            map_axes[i].imshow(img, extent=(raster.bounds.left, raster.bounds.right, raster.bounds.bottom, raster.bounds.top))
+            img_extent = (raster.bounds.left, raster.bounds.right, raster.bounds.bottom, raster.bounds.top)
+            map_axes[i].imshow(img, extent=img_extent)
+
+        # Kvitøya lies ~60 km east of the frame. Show it in an inset at the same map scale,
+        # placed just north of Austfonna at roughly its true northing.
+        kvitoya_width = kvitoya_xlim[1] - kvitoya_xlim[0]
+        kvitoya_height = kvitoya_ylim[1] - kvitoya_ylim[0]
+        kvitoya_ax = map_axes[i].inset_axes(
+            (kvitoya_anchor[0], kvitoya_anchor[1], kvitoya_width, kvitoya_height),
+            transform=map_axes[i].transData,
+        )
+        kvitoya_ax.imshow(img, extent=img_extent)
+        kvitoya_ax.set_xlim(kvitoya_xlim)
+        kvitoya_ax.set_ylim(kvitoya_ylim)
+        kvitoya_ax.set_xticks([])
+        kvitoya_ax.set_yticks([])
+        for spine in kvitoya_ax.spines.values():
+            spine.set_edgecolor("#555")
+            spine.set_linewidth(0.6)
+        kvitoya_ax.text(-0.04, 0.5, "Kvitøya", transform=kvitoya_ax.transAxes, ha="right", va="center", fontsize=7, color="#555")
+        map_axes[i].annotate(
+            "",
+            xy=(xmax - 2e3, kvitoya_anchor[1] + kvitoya_height / 2),
+            xytext=(kvitoya_anchor[0] + kvitoya_width, kvitoya_anchor[1] + kvitoya_height / 2),
+            xycoords="data",
+            arrowprops={"arrowstyle": "->", "color": "#555", "linewidth": 0.6, "shrinkA": 0, "shrinkB": 0},
+        )
         map_axes[i].set_xlim(xmin, xmax)
         map_axes[i].set_ylim(ymin, ymax)
         map_axes[i].set_aspect("equal")
@@ -167,7 +200,19 @@ def dhdt_overview_fig(show: bool = True):
 
     inset_items = add_inset_cbar(map_axes[1])
 
+    # Draw Kvitøya where the inset sits in the main maps, framed the same way
+    glacier_zones.loc[["K"], "geometry"] = glacier_zones.loc[["K"]].translate(*kvitoya_offset)
     glacier_zones.plot(color=glacier_zones["color"], ax=zone_inset)
+    zone_inset.add_patch(
+        matplotlib.patches.Rectangle(
+            kvitoya_anchor,
+            kvitoya_xlim[1] - kvitoya_xlim[0],
+            kvitoya_ylim[1] - kvitoya_ylim[0],
+            fill=False,
+            edgecolor="#555",
+            linewidth=0.4,
+        )
+    )
     zone_inset.set_xticks([])
     zone_inset.set_yticks([])
     for label, zone in glacier_zones.iterrows():
