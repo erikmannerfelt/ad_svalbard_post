@@ -19,9 +19,10 @@ def get_neff_model():
     # n_eff matches the variogram reported in the SI. The older table in `input/old/` came
     # from a superseded variogram and gave up to ~26x larger n_eff.
     neff_data = tools.read_aux_csv("vgm_neff_cirq.csv", index_col=0).squeeze()
-    model = scipy.interpolate.interp1d(neff_data.index, neff_data, fill_value="extrapolate")
+    model = scipy.interpolate.interp1d(neff_data.index, neff_data)
 
-    return lambda a: model(np.clip(a, a_min=0, a_max=1.2e8))
+    # The table spans 1 m2 to 35000 km2, which covers every glacier and the archipelago.
+    return lambda a: model(np.clip(a, a_min=neff_data.index.min(), a_max=neff_data.index.max()))
 
 
 def _nanmean_or_warn(values: np.ndarray, *, rgi_id: str, glac_name: str, interval_short: str, key: str) -> float:
