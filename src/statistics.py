@@ -11,6 +11,7 @@ from . import (
     coverage,
     gap_classifier,
     outlines,
+    positive_area,
     reporting,
     sampling,
     submarine,
@@ -381,7 +382,7 @@ def get_statistics():
             "elev_rate": "m~a$^{-1}$",
         },
         "parameters": {
-            "positive_change_threshold": 0.1,
+            "positive_change_threshold": positive_area.POSITIVE_THRESHOLD,
             "vertcoreg_min_comparisons": coreg.VERTCOREG_MIN_COMPARISONS,
         },
     }
@@ -503,6 +504,7 @@ def get_statistics():
     )
 
     all_stats["coverage"] = coverage.get_coverage_stats()
+    all_stats["positive_sensitivity"] = positive_area.get_sensitivity_stats(sampled)
 
     all_stats["comparisons"] = comparisons.get_comparisons(all_stats["changes"])
     comparisons.write_comparison_table(all_stats["changes"])
