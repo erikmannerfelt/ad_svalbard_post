@@ -1,6 +1,6 @@
 """Sensitivity of the positive-elevation-change area to its threshold and to noise.
 
-The area with rates above ``POSITIVE_THRESHOLD`` is a pixel count, so unlike the mean
+The area with rates above ``POSITIVE_CHANGE_THRESHOLD`` is a pixel count, so unlike the mean
 rates it is not averaged down by aggregation: the per-pixel error (~0.1 m a^-1) is of the
 same size as the threshold, and most of it is correlated over 5-16 km, the scale of the
 ice-cap interiors where the positive area lies. Two checks bound how much this matters:
@@ -25,10 +25,8 @@ import tqdm
 import xarray as xr
 
 from . import outlines, statistics, tools
-from .config import CACHE_DIR, INPUT_DIR
+from .config import CACHE_DIR, INPUT_DIR, POSITIVE_CHANGE_THRESHOLD
 
-#: Rate threshold (m a^-1) of the reported positive area; ``statistics`` reports the same.
-POSITIVE_THRESHOLD: Final = 0.1
 THRESHOLDS: Final = (0.0, 0.05, 0.1, 0.2)
 N_REALIZATIONS: Final = 100
 RANDOM_SEED: Final = 20261016
@@ -171,7 +169,7 @@ def simulate_positive_fractions(
     -------
     Dataset in percent of the partition's glacier area: ``observed`` (``interval``,
     ``partition``, ``threshold``) and ``simulated`` (``interval``, ``partition``,
-    ``realization``), the latter at ``POSITIVE_THRESHOLD``.
+    ``realization``), the latter at ``POSITIVE_CHANGE_THRESHOLD``.
     """
     cache_path = CACHE_DIR / "positive_area_sensitivity.nc"
     if cache_path.is_file() and not force_redo:
@@ -230,7 +228,7 @@ def simulate_positive_fractions(
             correlated = field[: glacier_id.shape[0], : glacier_id.shape[1]][on_glacier]
             noise = baseline_err * correlated + excess_err * rng.standard_normal()
             simulated[i, :, r] = _fractions_above(
-                slope + noise, POSITIVE_THRESHOLD, partition_masks
+                slope + noise, POSITIVE_CHANGE_THRESHOLD, partition_masks
             )
 
     dataset = xr.Dataset(
@@ -246,7 +244,7 @@ def simulate_positive_fractions(
         },
         attrs={
             "units": "percent of partition glacier area",
-            "positive_threshold_m_per_a": POSITIVE_THRESHOLD,
+            "positive_threshold_m_per_a": POSITIVE_CHANGE_THRESHOLD,
             "random_seed": RANDOM_SEED,
             "overview_level": OVERVIEW_LEVEL,
         },
@@ -295,7 +293,9 @@ def get_sensitivity_stats(
             )
             low, high = np.percentile(simulated.to_numpy(), [2.5, 97.5])
             per_partition[partition] = {
-                "observed": round(float(observed.sel(threshold=POSITIVE_THRESHOLD))),
+                "observed": round(
+                    float(observed.sel(threshold=POSITIVE_CHANGE_THRESHOLD))
+                ),
                 "thrlow": round(float(observed.min())),
                 "thrhigh": round(float(observed.max())),
                 "simlow": round(float(low)),

@@ -10,7 +10,7 @@ import pandas as pd
 import tqdm
 
 from . import outlines, tools
-from .config import CACHE_DIR, INPUT_DIR
+from .config import CACHE_DIR, INPUT_DIR, POSITIVE_CHANGE_THRESHOLD
 
 
 def get_neff_model():
@@ -205,8 +205,10 @@ def sample_rasters(redo: bool = False, overview_level: int | None = 2, use_tqdm:
                     key=key,
                 )
                 if "slope" in key and "_err" not in key:
-                    outlines_df.loc[idx, f"{key}_positive_vol"] = np.nansum(values[values > 0.]) * res_by_short[interval.short] ** 2
-                    outlines_df.loc[idx, f"{key}_positive_area"] = np.count_nonzero(values > 0.1) * res_by_short[interval.short] ** 2
+                    # Volume and area share the threshold, so they describe the same pixels.
+                    positive = values > POSITIVE_CHANGE_THRESHOLD
+                    outlines_df.loc[idx, f"{key}_positive_vol"] = np.nansum(values[positive]) * res_by_short[interval.short] ** 2
+                    outlines_df.loc[idx, f"{key}_positive_area"] = np.count_nonzero(positive) * res_by_short[interval.short] ** 2
 
     # for key in base_keys:
     #     outlines_df[[f"{key}_baseline_err_unscaled", f"{key}_fit_err", f"{key}_excess_err"]] *= 2

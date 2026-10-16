@@ -17,6 +17,7 @@ from . import (
     submarine,
     tools,
 )
+from .config import POSITIVE_CHANGE_THRESHOLD
 
 _PER_GLACIER_EXPORTS = [
     {"key": "storisstraumen", "glac_name": "Storisstraumen", "surging_13_24": True},
@@ -382,7 +383,7 @@ def get_statistics():
             "elev_rate": "m~a$^{-1}$",
         },
         "parameters": {
-            "positive_change_threshold": positive_area.POSITIVE_THRESHOLD,
+            "positive_change_threshold": POSITIVE_CHANGE_THRESHOLD,
             "vertcoreg_min_comparisons": coreg.VERTCOREG_MIN_COMPARISONS,
         },
     }
