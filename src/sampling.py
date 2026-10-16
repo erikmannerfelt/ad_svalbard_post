@@ -6,7 +6,6 @@ from typing import Final
 
 import geopandas as gpd
 import numpy as np
-import pandas as pd
 import tqdm
 
 from . import outlines, tools
@@ -16,10 +15,10 @@ from .config import CACHE_DIR, INPUT_DIR, POSITIVE_CHANGE_THRESHOLD
 def get_neff_model():
     import scipy.interpolate
 
-    neff_path = INPUT_DIR / "vgm_neff_cirq_numerical.csv"
-    if not neff_path.is_file():
-        neff_path = INPUT_DIR / "old" / "vgm_neff_cirq_numerical.csv"
-    neff_data = pd.read_csv(neff_path, index_col=0).squeeze()
+    # Written by `adsvalbard.variogram.main()` together with `variogram_model.csv`, so the
+    # n_eff matches the variogram reported in the SI. The older table in `input/old/` came
+    # from a superseded variogram and gave up to ~26x larger n_eff.
+    neff_data = tools.read_aux_csv("vgm_neff_cirq.csv", index_col=0).squeeze()
     model = scipy.interpolate.interp1d(neff_data.index, neff_data, fill_value="extrapolate")
 
     return lambda a: model(np.clip(a, a_min=0, a_max=1.2e8))
