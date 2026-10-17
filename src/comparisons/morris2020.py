@@ -11,9 +11,8 @@ possible to recompute the partition on a common grid under both surge definition
 and so measure how much of the difference between their 31% and our 49% is
 definitional rather than observational (:func:`partition_on_common_grid`).
 
-Note that their surge share counts actively surging *ice* delineated as basin
-outlines, whereas ours counts whole *glaciers* affected by an observed surge
-overlapping the interval. Ours is necessarily the broader category.
+Note that their surge mask and our surge-affected glacier outlines differ, mostly as an
+outline convention: theirs covers 4455 km2 and ours 5705 km2 in 2013-2018.
 """
 
 from __future__ import annotations
@@ -217,6 +216,9 @@ def summary(our_stats: dict[str, object]) -> dict[str, object]:
     """Numbers cited in the manuscript, for ``tables/statistics.tex``."""
     checks = cross_checks(our_stats)
     partition = partition_on_common_grid()
+    grid_check = validate_grid_integration()
+    period = period_sensitivity()
+    coverage = observation_coverage()
     return {
         "total_mass_rate": TOTAL_MASS_RATE.value,
         "total_mass_rate_err": TOTAL_MASS_RATE.error,
@@ -239,6 +241,16 @@ def summary(our_stats: dict[str, object]) -> dict[str, object]:
         "regridded_our_surge_share_percent": round(
             partition["our_surge_share_percent"]
         ),
+        # The Storisstraumen advance they credited as a gain (positive), see
+        # validate_grid_integration
+        "advance_credit_mass_rate": round(
+            -float(grid_check.loc["Austfonna", "difference"]), 1
+        ),
+        "their_surge_area": round(partition["their_surge_area_km2"]),
+        "our_surge_area": round(partition["our_surge_area_km2"]),
+        "period_surge_share_shift": round(period["surge_share_shift"]),
+        "surge_observed_percent": round(coverage["surge_observed_percent"]),
+        "nonsurge_observed_percent": round(coverage["nonsurge_observed_percent"]),
     }
 
 
