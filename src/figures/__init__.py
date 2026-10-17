@@ -6,6 +6,7 @@ from . import (
     overview,
     surge,
     surge_examples,
+    tcorr_examples,
     uncertainty,
     zonal,
 )
@@ -38,6 +39,9 @@ def make_all_figures(show: bool = False):
 
     print("Generating surge examples figure")
     surge_examples.plot_surge_examples(show=show)
+
+    print("Generating temporal correction examples figure")
+    tcorr_examples.plot_tcorr_examples(show=show)
 
     print("Generating zonal dH/dt figure")
     zonal.plot_zone_dhdt_fig(show=show)

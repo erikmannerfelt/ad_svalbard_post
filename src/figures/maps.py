@@ -71,6 +71,30 @@ class LocatorArea:
     label_offset: tuple[float, float]
 
 
+def read_trend_values(
+    filepath: Path,
+    xlim: tuple[float, float],
+    ylim: tuple[float, float],
+) -> tuple[np.ma.MaskedArray, tuple[float, float, float, float]]:
+    """Read a trend raster within a map extent, in m a-1.
+
+    Returns
+    -------
+    The scaled values (no data masked) and their ``imshow`` extent (left, right, bottom, top).
+    """
+    # The band scale is lost in the overview reads, so read it from the full-resolution raster
+    with rasterio.open(filepath) as raster:
+        scale = raster.scales[0]
+    with rasterio.open(filepath, overview_level=OVERVIEW_LEVEL) as raster:
+        window = rasterio.windows.from_bounds(
+            xlim[0], ylim[0], xlim[1], ylim[1], transform=raster.transform
+        )
+        window = window.round_offsets(op="floor").round_lengths(op="ceil")
+        values = raster.read(1, window=window, masked=True)
+        left, bottom, right, top = rasterio.windows.bounds(window, raster.transform)
+    return values.astype("float32") * scale, (left, right, bottom, top)
+
+
 def read_trend_rgba(
     filepath: Path,
     xlim: tuple[float, float],
@@ -83,20 +107,23 @@ def read_trend_rgba(
     -------
     The RGBA image (no data transparent) and its ``imshow`` extent (left, right, bottom, top).
     """
-    # The band scale is lost in the overview reads, so read it from the full-resolution raster
-    with rasterio.open(filepath) as raster:
-        scale = raster.scales[0]
-    with rasterio.open(filepath, overview_level=OVERVIEW_LEVEL) as raster:
-        window = rasterio.windows.from_bounds(
-            xlim[0], ylim[0], xlim[1], ylim[1], transform=raster.transform
-        )
-        window = window.round_offsets(op="floor").round_lengths(op="ceil")
-        values = raster.read(1, window=window, masked=True)
-        left, bottom, right, top = rasterio.windows.bounds(window, raster.transform)
-
-    rgba = mappable.to_rgba(values.astype("float32").filled(0.0) * scale)
+    values, extent = read_trend_values(filepath, xlim, ylim)
+    rgba = mappable.to_rgba(values.filled(0.0))
     rgba[np.ma.getmaskarray(values), 3] = 0.0
-    return rgba, (left, right, bottom, top)
+    return rgba, extent
+
+
+def style_map_axis(
+    axis: plt.Axes, xlim: tuple[float, float], ylim: tuple[float, float]
+) -> None:
+    """Set a map axis to the given extent, equal aspect, without ticks and with a frame."""
+    axis.set_xlim(xlim)
+    axis.set_ylim(ylim)
+    axis.set_aspect("equal")
+    axis.set_xticks([])
+    axis.set_yticks([])
+    for spine in axis.spines.values():
+        spine.set_linewidth(FRAME_LINEWIDTH)
 
 
 def add_map_axes(
@@ -111,13 +138,7 @@ def add_map_axes(
     axis = fig.add_axes(rect)
     img, extent = read_trend_rgba(filepath, xlim, ylim, mappable)
     axis.imshow(img, extent=extent, interpolation="antialiased")
-    axis.set_xlim(xlim)
-    axis.set_ylim(ylim)
-    axis.set_aspect("equal")
-    axis.set_xticks([])
-    axis.set_yticks([])
-    for spine in axis.spines.values():
-        spine.set_linewidth(FRAME_LINEWIDTH)
+    style_map_axis(axis, xlim, ylim)
     return axis
 
 
