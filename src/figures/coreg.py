@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import matplotlib.patches
 import matplotlib.patheffects
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -60,7 +61,7 @@ def plot_vertcoreg_summary(show: bool = True):
     data = coreg.read_vertcoreg_results()
     meta = coreg.read_vertcoreg_meta().copy()
 
-    meta["support_percent"] = meta["n_stable_points"] / meta["n_points"] * 100
+    support = coreg.read_vertcoreg_support()
 
     zones = [zone for zone in VERTCOREG_ZONE_NAMES if zone in set(meta["vertcoreg_zone"].dropna())]
     pre_color = "#666"
@@ -120,13 +121,29 @@ def plot_vertcoreg_summary(show: bool = True):
         frameon=False,
     )
 
+    # The sample points are the same every year, so the shares are constant per region
+    per_zone = support.groupby("vertcoreg_zone").first()
+    bar_width = 0.38
     for zone_index, zone in enumerate(zones):
-        subset = meta[meta["vertcoreg_zone"] == zone]
-        mean = float(subset["support_percent"].mean())
-        ax_support.bar(zone_index, mean, color="#555", width=0.7, edgecolor="none")
-    ax_support.set_ylabel("Stable terrain (%)")
+        row = per_zone.loc[zone]
+        in_region = 100 * row["n_stable_in_region"] / row["n_points_in_region"]
+        in_box = 100 * row["n_stable"] / row["n_points"]
+        ax_support.bar(zone_index - bar_width / 2, in_region, color="#555", width=bar_width, edgecolor="none")
+        ax_support.bar(zone_index + bar_width / 2, in_box, color="#bbb", width=bar_width, edgecolor="none")
+    ax_support.set_ylabel("Off-glacier points (%)")
     ax_support.set_xlim(-0.5, len(zones) - 0.5)
-    ax_support.set_ylim(0, 100)
+    ax_support.set_ylim(0, 50)
+    ax_support.legend(
+        handles=[
+            matplotlib.patches.Patch(color="#555", label="Region"),
+            matplotlib.patches.Patch(color="#bbb", label="Sampling box"),
+        ],
+        loc="upper left",
+        # Clear of the panel label
+        bbox_to_anchor=(0.08, 1.0),
+        fontsize=7,
+        frameon=False,
+    )
 
     for axis, positions in [(ax_support, range(len(zones))), (ax_nmad, zone_centers)]:
         axis.set_xlabel("")

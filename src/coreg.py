@@ -148,6 +148,19 @@ def read_vertcoreg_results() -> pd.DataFrame:
     return pd.concat(records, ignore_index=True)
 
 
+def read_vertcoreg_support() -> pd.DataFrame:
+    """Stable sample points of the regional deramping, per region and year.
+
+    Written by ``adsvalbard.vert_coreg.summarize_vertcoreg_support`` in the processing
+    repo. The points are drawn over land in a box of processing chunks around each
+    manually delineated region, so the off-glacier share differs between the box
+    (``n_stable / n_points``) and the region itself (``n_stable_in_region /
+    n_points_in_region``). The ``*_covered`` counts are the stable points inside at
+    least one accepted strip footprint that year (slight upper bounds).
+    """
+    return tools.read_aux_csv("vertcoreg_support.csv")
+
+
 def read_vertcoreg_meta() -> pd.DataFrame:
     records = []
     with tools.read_aux_zip("vertcoreg_results.zip") as zip_file:
