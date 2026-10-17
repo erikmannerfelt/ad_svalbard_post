@@ -303,6 +303,10 @@ def _get_submarine_and_tmb_stats(
                 "above_water_vol_rate_err": aw_vol_rate_err,
                 "above_water_mass_rate": aw_mass_rate,
                 "above_water_mass_rate_err": aw_mass_rate_err,
+                # The density term of above_water_mass_rate_err on its own.
+                "density_mass_rate_err": abs(
+                    aw_vol_rate * comparisons.common.RHO_AW_ERR
+                ),
                 "submarine_vol_rate": vol_rate,
                 "submarine_vol_rate_err": vol_rate_err,
                 "submarine_mass_rate": mass_rate,
@@ -359,6 +363,46 @@ def _get_bed_validation_stats() -> dict[str, object]:
                 "median_bias": round(row.median_bias_m),
             }
             for row in rows.itertuples()
+        }
+    return out
+
+
+def _subperiod_ratio(start: dict, end: dict) -> dict[str, object]:
+    ratio = end["vol_rate"] / start["vol_rate"]
+    return {
+        # One decimal, as cited in the text ("a factor of 3.9").
+        "vol_rate_ratio": f"{ratio:.1f}",
+        "vol_rate_increase_percent": round(100 * (ratio - 1)),
+    }
+
+
+def _get_subperiod_ratios(changes: dict) -> dict[str, object]:
+    """Ratio of the 2019-2024 to the 2013-2018 volume change rate.
+
+    Parameters
+    ----------
+    changes
+        The `changes` statistics, with `slope_start_mid` and `slope_mid_end`.
+
+    Returns
+    -------
+    Per partition (all, surging, nonsurging) and zone, `vol_rate_ratio` (one
+    decimal; >1 means more negative in 2019-2024) and
+    `vol_rate_increase_percent`. The surge classification is made per period,
+    so the surging ratios compare different sets of glaciers. Zones with no
+    volume change in either period (no glaciers in the partition) are skipped.
+    """
+    start, end = changes["slope_start_mid"], changes["slope_mid_end"]
+    out: dict[str, object] = {}
+    for partition in ("all", "surging", "nonsurging"):
+        per_zone = {
+            zone: _subperiod_ratio(start[partition]["per_zone"][zone], zone_end)
+            for zone, zone_end in end[partition]["per_zone"].items()
+            if zone_end["vol_rate"] != 0
+            and start[partition]["per_zone"][zone]["vol_rate"] != 0
+        }
+        out[partition] = _subperiod_ratio(start[partition], end[partition]) | {
+            "per_zone": per_zone
         }
     return out
 
@@ -496,6 +540,10 @@ def get_statistics():
             stats_key = "accel_start_end"
 
         all_stats["changes"][stats_key] = changes
+
+    all_stats["changes"]["ratio_mid_start"] = _get_subperiod_ratios(
+        all_stats["changes"]
+    )
 
     all_stats["classifier"] = gap_classifier.get_classifier_stats()
     gap_classifier.write_classifier_importance_table()
