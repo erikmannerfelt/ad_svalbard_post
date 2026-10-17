@@ -31,8 +31,13 @@ COMPARISON_DIR: Final = INPUT_DIR / "comparisons"
 # than fetched again. Nothing is required to be present.
 MIRROR_DIR: Final = PROJECT_DIR.parent / "resources"
 
-RGI7_ZIP: Final = INPUT_DIR / "RGI2000-v7.0-G-07_svalbard_jan_mayen.zip"
-RGI6_LINKS_MEMBER: Final = "RGI2000-v7.0-G-07_svalbard_jan_mayen-rgi6_links.csv"
+#: The full RGI7-RGI6 overlap table, with clusters of connected glaciers. The table
+#: shipped inside the RGI7 archive holds only 36 one-to-one links for this region.
+RGI6_LINKS_FILENAME: Final = "RGI2000-v7.0-G-07_svalbard_jan_mayen-rgi6_links.csv"
+RGI6_LINKS_URL: Final = (
+    "https://cluster.klima.uni-bremen.de/~fmaussion/misc/rgi7_data/rgi7_rgi6_links/"
+    + RGI6_LINKS_FILENAME
+)
 
 SAMPLED_PATH: Final = PROJECT_DIR / "cache" / "outlines_sampled.arrow"
 
@@ -127,26 +132,30 @@ def read_zip_member(archive: Path, member: str) -> bytes:
         return handle.read()
 
 
-def load_rgi6_links() -> pd.DataFrame:
-    """Load the official RGI7-to-RGI6 glacier links shipped inside the RGI7 archive.
+def load_rgi6_links(refresh_download: bool = False) -> pd.DataFrame:
+    """Load the RGI7-to-RGI6 overlap links for region 7.
 
-    For region 7 this table contains only one-to-one links between large glaciers,
-    all with better than 99.7% reciprocal area overlap. Using it avoids inventing a
-    spatial matching heuristic, at the cost of covering fewer glaciers.
+    One row per overlapping pair, including many-to-many cases where glaciers were
+    split or merged between the inventories.
 
     Returns
     -------
     pandas.DataFrame
-        Columns ``rgi7_id``, ``rgi6_id`` and the two reciprocal area fractions.
+        Columns ``rgi7_id``, ``rgi6_id``, ``overlap_area_km2``, the two reciprocal
+        area fractions and ``cluster_id`` (connected group of linked glaciers).
     """
-    if not RGI7_ZIP.is_file():
-        raise FileNotFoundError(f"RGI7 archive not found: {RGI7_ZIP}")
-    with (
-        zipfile.ZipFile(RGI7_ZIP) as archive,
-        archive.open(RGI6_LINKS_MEMBER) as handle,
-    ):
-        links = pd.read_csv(handle)
-    return links[["rgi7_id", "rgi6_id", "rgi7_area_fraction", "rgi6_area_fraction"]]
+    path = fetch(RGI6_LINKS_URL, RGI6_LINKS_FILENAME, refresh_download=refresh_download)
+    links = pd.read_csv(path)
+    return links[
+        [
+            "rgi7_id",
+            "rgi6_id",
+            "overlap_area_km2",
+            "rgi7_area_fraction",
+            "rgi6_area_fraction",
+            "cluster_id",
+        ]
+    ]
 
 
 def load_our_glaciers(interval: str = "13_18") -> pd.DataFrame:
