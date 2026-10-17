@@ -16,6 +16,12 @@ Dussaillant et al. (2025) for the method and the dataset DOI for the numbers.
 
 The annual series also provides an independent check on the central claim of this
 study, since the two sub-period means can be computed directly from it.
+
+**Matching windows.** The series is indexed by hydrological year (October-September,
+labeled by its end year). Our records run from spring to spring, so the 2013-2018 rate
+spans the melt seasons 2013-2017, i.e. hydrological years 2013-2017, and likewise
+2019-2023 for 2019-2024. Averaging 2019-2024 instead would add the record-negative 2024
+season, which our record ends before.
 """
 
 from __future__ import annotations
@@ -33,6 +39,15 @@ URL: Final = f"https://wgms.ch/downloads/wgms-amce-{VERSION}.zip"
 FILENAME: Final = f"wgms-amce-{VERSION}.zip"
 REGION_MEMBER: Final = "region/SJM.csv"
 REGION_CODE: Final = "SJM"  # Svalbard and Jan Mayen
+
+#: Hydrological years matching each of our intervals (see the module docstring).
+MATCHED_WINDOWS: Final = {
+    "start_mid": (2013, 2017),
+    "mid_end": (2019, 2023),
+    "start_end": (2013, 2023),
+}
+#: The melt season after the end of our record, cited separately.
+FINAL_YEAR: Final = 2024
 
 #: As published by Dussaillant et al. (2025) for 2015-2024, for cross-reference.
 DUSSAILLANT_2015_2024: Final = common.Estimate(-24.9, 9.4)  # Gt a^-1
@@ -100,11 +115,11 @@ def sub_period_contrast() -> dict[str, float]:
 
     Our headline result is that the archipelago-wide loss rate rose sharply between
     2013-2018 and 2019-2024. Because this product resolves individual years, that
-    contrast can be evaluated in it directly.
+    contrast can be evaluated in it directly, over the matching hydrological years.
     """
-    first = window_mean(2013, 2018)
-    second = window_mean(2019, 2024)
-    full = window_mean(2013, 2024)
+    first = window_mean(*MATCHED_WINDOWS["start_mid"])
+    second = window_mean(*MATCHED_WINDOWS["mid_end"])
+    full = window_mean(*MATCHED_WINDOWS["start_end"])
     return {
         "start_mid_mass_rate": first["mass_rate"],
         "mid_end_mass_rate": second["mass_rate"],
@@ -120,13 +135,20 @@ def summary() -> dict[str, object]:
     """Numbers cited in the manuscript, for ``tables/statistics.tex``."""
     contrast = sub_period_contrast()
     version = version_comparison()
-    full = window_mean(2013, 2024)
+    full = window_mean(*MATCHED_WINDOWS["start_end"])
+    mid_end_first_year = MATCHED_WINDOWS["mid_end"][0]
     return {
         "version": VERSION,
         "mass_rate_start_mid": round(contrast["start_mid_mass_rate"], 1),
         "mass_rate_mid_end": round(contrast["mid_end_mass_rate"], 1),
         "mass_rate_start_end": round(contrast["start_end_mass_rate"], 1),
+        "sigma_start_mid": round(contrast["start_mid_sigma_correlated"], 1),
+        "sigma_mid_end": round(contrast["mid_end_sigma_correlated"], 1),
         "sigma_start_end": round(full["sigma_correlated"], 1),
+        "final_year_mass_rate": round(window_mean(FINAL_YEAR, FINAL_YEAR)["mass_rate"]),
+        "mass_rate_mid_end_incl_final_year": round(
+            window_mean(mid_end_first_year, FINAL_YEAR)["mass_rate"], 1
+        ),
         "ratio": round(contrast["ratio"], 1),
         "area": round(full["area_km2"]),
         "amce_dussaillant_window": round(version["amce_2015_2024"], 1),
