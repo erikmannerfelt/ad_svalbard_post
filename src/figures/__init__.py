@@ -8,6 +8,7 @@ from . import (
     surge_examples,
     tcorr_examples,
     uncertainty,
+    uncertainty_illustration,
     zonal,
 )
 
@@ -45,6 +46,9 @@ def make_all_figures(show: bool = False):
 
     print("Generating zonal dH/dt figure")
     zonal.plot_zone_dhdt_fig(show=show)
+
+    print("Generating uncertainty illustration figure")
+    uncertainty_illustration.plot_uncertainty_illustration(show=show)
 
     print("Generating patch method vs uncertainty figure")
     uncertainty.plot_patch_method_vs_vgm(show=show)
