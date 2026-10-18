@@ -41,7 +41,8 @@ def _linear(t: np.ndarray) -> np.ndarray:
 
 
 def _nonlinear(t: np.ndarray) -> np.ndarray:
-    return -1.5 * t + 1.8 * np.sin(2 * np.pi * t / 5.0)
+    # Thickening that peaks near the middle and turns to thinning, as in main Fig. 2
+    return -0.3 * t - 0.16 * t**2
 
 
 def _surge(t: np.ndarray) -> np.ndarray:
@@ -118,10 +119,17 @@ def _plot_timeseries_panels(
                 fontsize=8,
                 va="top",
             )
-        else:
+        elif history is _surge:
             # Limits follow the data, so the fans may be cut at the ends
             pad = 0.12 * np.ptp(elevation)
             axis.set_ylim(elevation.min() - pad, elevation.max() + pad)
+        else:
+            # The linear and nonlinear panels share one elevation span, so their fans
+            # can be compared directly
+            linear = _linear(t) + scatter
+            half_span = 0.62 * np.ptp(linear)
+            middle = 0.5 * (elevation.min() + elevation.max())
+            axis.set_ylim(middle - half_span, middle + half_span)
         if history is _nonlinear:
             axis.text(
                 0.98,
