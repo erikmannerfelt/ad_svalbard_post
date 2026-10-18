@@ -29,7 +29,7 @@ DEFAULT_CENTER: Final = (20.0, 68.0)
 SVALBARD_BOUNDS: Final = (9.5, 76.2, 34.0, 80.9)
 LAND_COLOR: Final = "#8c8c8c"
 BORDER_COLOR: Final = "#3a3a3a"
-HIGHLIGHT_COLOR: Final = "black"
+HIGHLIGHT_COLOR: Final = "#e41a1c"
 
 
 def _orthographic_crs(center: tuple[float, float]) -> str:
@@ -125,7 +125,7 @@ def draw_globe(
         ],
         crs=f"+proj=longlat +R={SPHERE_RADIUS} +no_defs",
     ).to_crs(_orthographic_crs(center))
-    box.plot(ax=axis, color=HIGHLIGHT_COLOR, linewidth=0.9, zorder=3)
+    box.plot(ax=axis, color=HIGHLIGHT_COLOR, linewidth=1.6, zorder=3)
 
     axis.add_patch(
         matplotlib.patches.Circle(

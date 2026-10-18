@@ -111,19 +111,11 @@ def dhdt_overview_fig(show: bool = True):
     zone_inset = fig.add_axes((0., 0.23, 0.16, 0.16 * box_aspect))
 
 
-    all_axes = [*map_axes,zone_inset, *ax_small]
-    # The map labels are moved right of the globe in the corner of panel a, the same in b.
-    # They and the globe are top-aligned with the Kvitøya inset, which sticks out above
-    # the map frame.
+    # The 2013–2018 label and both titles sit right of the globe in the corner of the first
+    # map. They and the globe are top-aligned with the Kvitøya inset, which sticks out
+    # above the map frame.
     map_label_x = 0.27
     map_top_y = (kvitoya_ylim[1] + kvitoya_anchor[1] - kvitoya_ylim[0] - ymin) / (ymax - ymin)
-    for label, ax in zip("abcdefghijk", all_axes):
-        ax.text(
-            map_label_x if ax in map_axes else 0.02, map_top_y if ax in map_axes else 0.98, f"{label})",
-            transform=ax.transAxes,
-            ha="left",
-            va="top",
-        )
 
 
     # fig = plt.figure(figsize=(8.3, 5.3))
@@ -181,32 +173,50 @@ def dhdt_overview_fig(show: bool = True):
             )
             locator.draw_globe(globe_ax)
 
-            scale_km = 100
-            scale_xmax = map_axes[i].get_xlim()[1] - 1e4
-            scale_y = map_axes[i].get_ylim()[0] + 7e4
-            map_axes[i].plot([scale_xmax - scale_km * 1000, scale_xmax], [scale_y] * 2, color="#555")
-            for label, xcoord in [
-                ("0 km", scale_xmax - scale_km * 1000),
-                (f"{scale_km} km", scale_xmax),
-            ]:
-                map_axes[i].text(
-                    xcoord,
-                    scale_y - 3e3,
-                    label,
-                    transform=map_axes[i].transData,
-                    fontsize=8,
-                    ha="center",
-                    va="top",
-                    color="#555",
-                )
-                map_axes[i].plot([xcoord] * 2, [scale_y, scale_y + 1e4], color="#555")
-            
 
-    def add_inset_cbar(axis, left=0.6):
-        inset = axis.inset_axes((left, 0.08, 0.1, 0.15))
+    # Scale bar in the 2019–2024 map, in the open sea between south Spitsbergen and the colorbar
+    scale_km = 100
+    scale_xmax = xmin + 0.79 * (xmax - xmin)
+    scale_y = ymin + 7e4
+    map_axes[1].plot([scale_xmax - scale_km * 1000, scale_xmax], [scale_y] * 2, color="#555")
+    for label, xcoord in [
+        ("0 km", scale_xmax - scale_km * 1000),
+        (f"{scale_km} km", scale_xmax),
+    ]:
+        map_axes[1].text(
+            xcoord,
+            scale_y - 3e3,
+            label,
+            transform=map_axes[1].transData,
+            fontsize=8,
+            ha="center",
+            va="top",
+            color="#555",
+        )
+        map_axes[1].plot([xcoord] * 2, [scale_y, scale_y + 1e4], color="#555")
+
+    # Panel letters: the globe is a), the 2019–2024 letter goes to the far left of its map
+    label_positions = [
+        (globe_ax, 0.0, 1.0),
+        (ax_map1, map_label_x, map_top_y),
+        (ax_map2, 0.0, map_top_y),
+        (zone_inset, 0.02, 0.98),
+        *((ax, 0.02, 0.98) for ax in ax_small),
+    ]
+    for label, (ax, x, y) in zip("abcdefghijkl", label_positions):
+        ax.text(x, y, f"{label})", transform=ax.transAxes, ha="left", va="top")
+
+    # The bar is about as thick (~4 mm) as the one in elevation_change_examples
+    def add_inset_cbar(axis, left=0.86, width=0.038, height=0.19):
+        inset = axis.inset_axes((left, 0.08, width, height))
         cbar = plt.colorbar(DHDT_SM, cax=inset, pad=0.02, extend="both")
-        text2 = plt.text(1.15, 0.5, "m a$^{-1}$", ha="left", va="center", transform=inset.transAxes)
-        cbar.set_ticks([DHDT_NORMALIZER.vmin, DHDT_NORMALIZER.vmax], labels=[f"≤{DHDT_NORMALIZER.vmin:.0f}", f"≥{DHDT_NORMALIZER.vmax:.0f}"])
+        text2 = axis.text(left + width + 0.015, 0.08 + height / 2, "m a$^{-1}$", ha="left", va="center", fontsize=7, transform=axis.transAxes)
+        cbar.set_ticks(
+            [DHDT_NORMALIZER.vmin, DHDT_NORMALIZER.vmax],
+            labels=[f"≤{DHDT_NORMALIZER.vmin:.0f}".replace("-", "−"), f"≥{DHDT_NORMALIZER.vmax:.0f}"],
+        )
+        cbar.ax.tick_params(labelsize=7, length=2)
+        cbar.outline.set_linewidth(0.6)
         return [text2, inset]
 
     inset_items = add_inset_cbar(map_axes[1])

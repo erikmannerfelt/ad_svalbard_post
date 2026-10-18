@@ -75,7 +75,7 @@ EXAMPLE_AREAS: Final = (
 LOCATOR_XLIM: Final = (390_762.9, 782_158.9)
 LOCATOR_YLIM: Final = (8_477_170.0, 8_959_371.1)
 # Locator position and size (left, top, width, height) in mm from the figure's top-left corner
-LOCATOR_BOX_MM: Final = (119.85, 103.42, 27.34, 33.68)
+LOCATOR_BOX_MM: Final = (120.0, 103.42, 27.34, 33.68)
 # dH/dt colorbar box, straddling the g/j boundary in the left column
 DHDT_CBAR_BOX_MM: Final = (0.0, 104.0, 17.0, 31.0)
 
@@ -164,6 +164,12 @@ def plot_elevation_change_examples(show: bool = False) -> None:
                 < DHDT_CBAR_BOX_MM[1] + DHDT_CBAR_BOX_MM[3]
             ):
                 left_mm = DHDT_CBAR_BOX_MM[2]
+            # Move the label of the cell under the locator to its right, at the same height
+            if (
+                col_i == 2
+                and LOCATOR_BOX_MM[1] < top_mm < LOCATOR_BOX_MM[1] + LOCATOR_BOX_MM[3]
+            ):
+                left_mm = LOCATOR_BOX_MM[0] + LOCATOR_BOX_MM[2]
             maps.add_panel_label(fig, FIG_SIZE, next(labels), left_mm, top_mm)
 
     # Cell frames for the timeseries column, matching the map frames
