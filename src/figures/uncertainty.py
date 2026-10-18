@@ -166,8 +166,8 @@ def plot_patch_method_vs_vgm(show: bool = True):
             ax.scatter(patch["exact_areas"] / 1e6, patch["nmad"], marker="x", c="k", zorder=2, label="Patch method")
             surging = outlines.query(f"surging_{interval.short}")
             nonsurging = outlines.query(f"~surging_{interval.short}")
-            ax.scatter(nonsurging[area_col] / 1e6, nonsurging[col], alpha=0.4, edgecolor="none", s=20, label="Nonsurging", rasterized=True)
-            ax.scatter(surging[area_col] / 1e6, surging[col], alpha=0.4, edgecolor="none", s=20, label="Surging")
+            ax.scatter(nonsurging[area_col] / 1e6, nonsurging[col], alpha=0.4, edgecolor="none", s=20, label="Other glaciers", rasterized=True)
+            ax.scatter(surging[area_col] / 1e6, surging[col], alpha=0.4, edgecolor="none", s=20, label="Surge-affected")
 
             ax.set_xscale("log")
             ax.set_yscale("log")
@@ -177,7 +177,15 @@ def plot_patch_method_vs_vgm(show: bool = True):
             if j == 0 and i == 1:
                 ax.set_ylabel("Integrated uncertainty (m)")
             if j == 0 and i == (len(intervals) - 1):
-                ax.legend(fontsize=8)
+                # Compact, in the upper right where the rates have fallen off with area
+                ax.legend(
+                    loc="upper right",
+                    fontsize=7,
+                    labelspacing=0.15,
+                    handletextpad=0.1,
+                    borderpad=0.25,
+                    borderaxespad=0.2,
+                )
             if i == (len(intervals) - 1):
                 ax.set_xlabel("Area (km²)")
 
