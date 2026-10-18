@@ -131,13 +131,22 @@ def sub_period_contrast() -> dict[str, float]:
     }
 
 
-def summary() -> dict[str, object]:
-    """Numbers cited in the manuscript, for ``tables/statistics.tex``."""
+def summary(our_mass_rates: dict[str, common.Estimate]) -> dict[str, object]:
+    """Numbers cited in the manuscript, for ``tables/statistics.tex``.
+
+    Parameters
+    ----------
+    our_mass_rates
+        Our above-water mass rates (Gt a^-1) keyed by interval (``start_mid``,
+        ``mid_end``, ``start_end``), for the sigma comparison over the matched
+        hydrological years. Submarine change is left out because the series does not
+        capture it.
+    """
     contrast = sub_period_contrast()
     version = version_comparison()
     full = window_mean(*MATCHED_WINDOWS["start_end"])
     mid_end_first_year = MATCHED_WINDOWS["mid_end"][0]
-    return {
+    out: dict[str, object] = {
         "version": VERSION,
         "mass_rate_start_mid": round(contrast["start_mid_mass_rate"], 1),
         "mass_rate_mid_end": round(contrast["mid_end_mass_rate"], 1),
@@ -155,3 +164,16 @@ def summary() -> dict[str, object]:
         "dussaillant_published": DUSSAILLANT_2015_2024.value,
         "version_percent_difference": round(version["percent_difference"]),
     }
+    # The two annual-error bounds of window_mean() bracket the significance, as the
+    # 1-sigma range of their published windows does for Hugonnet et al.
+    for key, (start, end) in MATCHED_WINDOWS.items():
+        window = window_mean(start, end)
+        for bound, sigma_key in (
+            ("low", "sigma_correlated"),
+            ("high", "sigma_independent"),
+        ):
+            theirs = common.Estimate(window["mass_rate"], window[sigma_key])
+            out[f"sigma_from_ours_{key}_{bound}"] = round(
+                common.sigma_difference(our_mass_rates[key], theirs), 1
+            )
+    return out

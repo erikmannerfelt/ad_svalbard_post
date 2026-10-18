@@ -208,7 +208,8 @@ def get_coverage_stats(force_redo: tools.ForceRedo = False) -> dict[str, object]
     Returns
     -------
     ``source`` holds the percentage of glacier area whose most common source over the
-    record is each product; ``leverage`` the seasonal trend leverage per interval
+    record is each product, and ``source_area`` the same as an area (km^2), since some
+    products cover too little to show as a percentage; ``leverage`` the seasonal trend leverage per interval
     (m a^-1 of bias per meter of summer lowering, see :func:`seasonal_trend_leverage`).
     """
     dataset = sample_annual_mosaics(force_redo=force_redo)
@@ -218,6 +219,11 @@ def get_coverage_stats(force_redo: tools.ForceRedo = False) -> dict[str, object]
     mode = mode[mode > 0]
     source = {
         QUALITY_KEYS[flag]: round(100 * float(np.mean(mode == flag)), 1)
+        for flag in QUALITY_KEYS
+    }
+    pixel_area_km2 = float(dataset.attrs["transform"][0]) ** 2 / 1e6
+    source_area = {
+        QUALITY_KEYS[flag]: round(pixel_area_km2 * float(np.sum(mode == flag)))
         for flag in QUALITY_KEYS
     }
 
@@ -242,6 +248,7 @@ def get_coverage_stats(force_redo: tools.ForceRedo = False) -> dict[str, object]
 
     return {
         "source": source,
+        "source_area": source_area,
         "leverage": {
             k: round(v, 3)
             for k, v in seasonal_trend_leverage(season["melt_fraction"]).items()

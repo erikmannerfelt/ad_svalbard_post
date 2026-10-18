@@ -19,6 +19,7 @@ import json
 from pathlib import Path
 from typing import Final
 
+from .. import tools
 from ..config import TABLE_DIR
 from . import common, geyman2022, hugonnet2021, morris2020, wang2022, wgms_amce
 
@@ -80,7 +81,21 @@ def get_comparisons(
         "morris": lambda: morris2020.summary(our_changes),
         "hugonnet": hugonnet2021.summary,
         "geyman": geyman2022.summary,
-        "wgmsamce": wgms_amce.summary,
+        "wgmsamce": lambda: wgms_amce.summary(
+            {
+                interval.stats_key: common.Estimate(
+                    float(
+                        our_changes[f"slope_{interval.stats_key}"]["all"]["vol_rate"]
+                    ),
+                    float(
+                        our_changes[f"slope_{interval.stats_key}"]["all"][
+                            "vol_rate_err"
+                        ]
+                    ),
+                ).to_mass()
+                for interval in tools.iter_intervals()
+            }
+        ),
         "wang": lambda: wang2022.summary(
             ours["volume_rate_mid_end"], ours["mass_rate_mid_end"]
         ),
