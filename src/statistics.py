@@ -437,18 +437,12 @@ def get_statistics():
     vertcoreg = coreg.read_vertcoreg_results()
     vertcoreg_meta = coreg.read_vertcoreg_meta()
     vertcoreg_support = coreg.read_vertcoreg_support()
-    # Off-glacier shares are constant per region (same points every year); coverage varies
+    # Off-glacier shares are constant per region (same points every year)
     support_per_zone = vertcoreg_support.groupby("vertcoreg_zone").first()
     stable_in_region_percent = (
         100
         * support_per_zone["n_stable_in_region"]
         / support_per_zone["n_points_in_region"]
-    )
-    stable_in_box_percent = (
-        100 * support_per_zone["n_stable"] / support_per_zone["n_points"]
-    )
-    stable_covered_percent = (
-        100 * vertcoreg_support["n_stable_covered"] / vertcoreg_support["n_stable"]
     )
 
     all_stats["coregistration"] = {
@@ -479,12 +473,6 @@ def get_statistics():
             "stable_in_region_percent_max": round(
                 float(stable_in_region_percent.max())
             ),
-            "stable_in_box_percent_min": round(float(stable_in_box_percent.min())),
-            "stable_in_box_percent_max": round(float(stable_in_box_percent.max())),
-            "stable_covered_percent_median": round(
-                float(stable_covered_percent.median())
-            ),
-            "stable_covered_percent_min": round(float(stable_covered_percent.min())),
             "between_pair_nmad_pre_mean": float(vertcoreg_meta["nmad_pre"].mean()),
             "between_pair_nmad_post_mean": float(vertcoreg_meta["nmad_post"].mean()),
         },

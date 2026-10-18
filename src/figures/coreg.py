@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import matplotlib.patches
 import matplotlib.patheffects
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -121,29 +120,29 @@ def plot_vertcoreg_summary(show: bool = True):
         frameon=False,
     )
 
-    # The sample points are the same every year, so the shares are constant per region
+    # The stable share of each region, against the typical strip of the rigid approach: the
+    # regions are where that approach lacks the stable terrain it relies on. The sample
+    # points are the same every year, so the share is constant per region.
     per_zone = support.groupby("vertcoreg_zone").first()
-    bar_width = 0.38
     for zone_index, zone in enumerate(zones):
         row = per_zone.loc[zone]
         in_region = 100 * row["n_stable_in_region"] / row["n_points_in_region"]
-        in_box = 100 * row["n_stable"] / row["n_points"]
-        ax_support.bar(zone_index - bar_width / 2, in_region, color="#555", width=bar_width, edgecolor="none")
-        ax_support.bar(zone_index + bar_width / 2, in_box, color="#bbb", width=bar_width, edgecolor="none")
-    ax_support.set_ylabel("Off-glacier points (%)")
-    ax_support.set_xlim(-0.5, len(zones) - 0.5)
-    ax_support.set_ylim(0, 50)
-    ax_support.legend(
-        handles=[
-            matplotlib.patches.Patch(color="#555", label="Region"),
-            matplotlib.patches.Patch(color="#bbb", label="Sampling box"),
-        ],
-        loc="upper left",
-        # Clear of the panel label
-        bbox_to_anchor=(0.08, 1.0),
+        ax_support.bar(zone_index, in_region, color="#555", width=0.7, edgecolor="none")
+    rigid_median = 100 * float(coreg.read_rigidcoreg_results()["stable_fraction"].median())
+    ax_support.axhline(rigid_median, color="#555", linestyle="--", linewidth=0.8)
+    ax_support.annotate(
+        "Rigid co-registration median",
+        xy=(len(zones) - 0.5, rigid_median),
+        xytext=(-2, 2),
+        textcoords="offset points",
+        ha="right",
+        va="bottom",
         fontsize=7,
-        frameon=False,
+        color="#555",
     )
+    ax_support.set_ylabel("Stable terrain (%)")
+    ax_support.set_xlim(-0.5, len(zones) - 0.5)
+    ax_support.set_ylim(0, 32)
 
     for axis, positions in [(ax_support, range(len(zones))), (ax_nmad, zone_centers)]:
         axis.set_xlabel("")
