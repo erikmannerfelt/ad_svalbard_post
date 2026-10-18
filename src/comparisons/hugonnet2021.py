@@ -178,8 +178,11 @@ def compare_subset(subset: pd.DataFrame) -> dict[str, float]:
     -------
     dict
         ``our_vol_rate``, ``our_vol_rate_err``, ``hugonnet_vol_rate`` (km^3 a^-1),
-        ``area`` (km^2), ``percent_difference`` (ours relative to theirs) and
-        ``sigma_low``/``sigma_high`` (difference over the combined 1-sigma error).
+        ``area`` (km^2), ``percent_difference`` (ours relative to theirs),
+        ``sigma_low``/``sigma_high`` (difference over the combined 1-sigma error) and
+        ``percent_less_negative`` (theirs relative to ours) with
+        ``percent_less_negative_err``, the larger combined 1-sigma error relative to
+        ours, so that their ratio is ``sigma_low``.
     """
     area_m2 = float(subset["area_13_18"].sum())
     baseline = float(subset["slope_13_18_vol_baseline_err_unscaled"].sum()) / (
@@ -199,6 +202,10 @@ def compare_subset(subset: pd.DataFrame) -> dict[str, float]:
         "percent_difference": 100.0 * (ours - theirs) / theirs,
         "sigma_low": difference / float(np.hypot(ours_err, theirs_errs[1])),
         "sigma_high": difference / float(np.hypot(ours_err, theirs_errs[0])),
+        "percent_less_negative": 100.0 * (ours - theirs) / ours,
+        "percent_less_negative_err": 100.0
+        * float(np.hypot(ours_err, theirs_errs[1]))
+        / abs(ours),
     }
 
 
@@ -327,6 +334,8 @@ def summary() -> dict[str, object]:
             "percent_difference": round(values["percent_difference"]),
             "sigma_low": round(values["sigma_low"], 1),
             "sigma_high": round(values["sigma_high"], 1),
+            "percent_less_negative": round(values["percent_less_negative"]),
+            "percent_less_negative_err": round(values["percent_less_negative_err"]),
         }
         for name, values in subset_comparison().items()
     }
