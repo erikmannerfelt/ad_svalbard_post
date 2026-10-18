@@ -7,6 +7,7 @@ from pathlib import Path
 
 import matplotlib.cm
 import matplotlib.colors
+import numpy as np
 from PIL import Image
 
 DHDT_VMIN = 2
@@ -14,6 +15,10 @@ DHDT_VMAX = 1
 DHDT_COLORS = [(-DHDT_VMIN, "#400912"), (-0.75 * DHDT_VMIN, "#630d1c"), (-0.40 * DHDT_VMIN, "#cd721c"), (-0., "#eeeeec"), (DHDT_VMAX, "#6497e3")]
 DHDT_NORMALIZER = matplotlib.colors.Normalize(vmin=-DHDT_VMIN, vmax=DHDT_VMAX, clip=True)
 DHDT_SM = matplotlib.cm.ScalarMappable(norm=DHDT_NORMALIZER, cmap=matplotlib.colors.LinearSegmentedColormap.from_list("dhdt", [(DHDT_NORMALIZER(a), b) for a, b in DHDT_COLORS]))
+
+
+#: Share of semi-transparent pixels above which svg_png_to_jpg() keeps an image as PNG.
+TRANSLUCENT_PNG_FRACTION = 0.05
 
 
 def svg_png_to_jpg(svg_path: Path | str, out_path: Path | str | None = None, *, quality=90):
@@ -31,6 +36,12 @@ def svg_png_to_jpg(svg_path: Path | str, out_path: Path | str | None = None, *, 
         data = base64.b64decode(href.split(",", 1)[1])
         im = Image.open(io.BytesIO(data))
         if im.mode == "RGBA":
+            # A translucent overlay (e.g. the globe shading in locator.py) cannot be
+            # flattened onto white without hiding what lies beneath, so keep it as PNG.
+            # Antialiased edges of opaque rasters are only a sliver of their pixels.
+            alpha = np.asarray(im.split()[-1])
+            if np.mean((alpha > 0) & (alpha < 255)) > TRANSLUCENT_PNG_FRACTION:
+                continue
             bg = Image.new("RGB", im.size, (255, 255, 255))
             bg.paste(im, mask=im.split()[-1])
             im = bg

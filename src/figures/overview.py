@@ -8,6 +8,7 @@ import numpy as np
 
 from .. import outlines
 from .. import statistics
+from . import locator
 from .common import DHDT_NORMALIZER, DHDT_SM, svg_png_to_jpg
 
 
@@ -31,13 +32,11 @@ def dhdt_overview_fig(show: bool = True):
 
 
     xmin = 402_000
-    ymax = 8_972_000
-    height = 504_000
-    box_aspect = 1.38  # height / width
-
-    width = height / box_aspect
-    xmax = xmin + width
-    ymin = ymax - height
+    xmax = 767_217
+    # The top edge cuts off Sjuøyane (unglaciated islets) to free the corner for the globe
+    ymin = 8_468_000
+    ymax = 8_950_000
+    box_aspect = (ymax - ymin) / (xmax - xmin)  # height / width
 
     # Kvitøya extent (glacier bounds plus a margin) and the inset's lower-left corner in map coordinates
     kvitoya_xlim = (809_000, 848_000)
@@ -54,7 +53,7 @@ def dhdt_overview_fig(show: bool = True):
         left=0.055,
         right=0.985,
         bottom=0.065,
-        top=0.985,
+        top=0.955,
         hspace=0.035,
     )
 
@@ -113,9 +112,14 @@ def dhdt_overview_fig(show: bool = True):
 
 
     all_axes = [*map_axes,zone_inset, *ax_small]
+    # The map labels are moved right of the globe in the corner of panel a, the same in b.
+    # They and the globe are top-aligned with the Kvitøya inset, which sticks out above
+    # the map frame.
+    map_label_x = 0.27
+    map_top_y = (kvitoya_ylim[1] + kvitoya_anchor[1] - kvitoya_ylim[0] - ymin) / (ymax - ymin)
     for label, ax in zip("abcdefghijk", all_axes):
         ax.text(
-            0.02, 0.98, f"{label})",
+            map_label_x if ax in map_axes else 0.02, map_top_y if ax in map_axes else 0.98, f"{label})",
             transform=ax.transAxes,
             ha="left",
             va="top",
@@ -166,10 +170,17 @@ def dhdt_overview_fig(show: bool = True):
         map_axes[i].set_ylim(ymin, ymax)
         map_axes[i].set_aspect("equal")
         map_axes[i].set_axis_off()
-        map_axes[i].text(0.15, 0.98, params["title"], transform=map_axes[i].transAxes, fontsize=12, va="top")
+        map_axes[i].text(map_label_x + 0.07, map_top_y, params["title"], transform=map_axes[i].transAxes, fontsize=12, va="top")
         map_axes[i].ticklabel_format(scilimits=(0, 0))
 
         if i == 0:
+            # Globe locator in the open sea northwest of Spitsbergen.
+            globe_width = 0.25
+            globe_ax = map_axes[i].inset_axes(
+                (0.0, map_top_y - globe_width / box_aspect, globe_width, globe_width / box_aspect)
+            )
+            locator.draw_globe(globe_ax)
+
             scale_km = 100
             scale_xmax = map_axes[i].get_xlim()[1] - 1e4
             scale_y = map_axes[i].get_ylim()[0] + 7e4
