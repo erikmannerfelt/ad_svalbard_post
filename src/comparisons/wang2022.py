@@ -92,8 +92,9 @@ def summary(
         "percent_explained_by_density": round(
             attribution["percent_explained_by_density"]
         ),
-        "sigma_from_ours_volume": round(
-            common.sigma_difference(our_volume_rate, VOLUME_RATE), 1
+        # Preformatted, since reporting renders every float with two decimals
+        "sigma_from_ours_volume": (
+            f"{common.sigma_difference(our_volume_rate, VOLUME_RATE):.1f}"
         ),
         "area": int(AREA_KM2),
     }

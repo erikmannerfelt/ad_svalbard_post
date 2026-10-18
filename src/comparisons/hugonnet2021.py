@@ -332,8 +332,9 @@ def summary() -> dict[str, object]:
             "our_vol_rate_err": round(values["our_vol_rate_err"], 2),
             "hugonnet_vol_rate": round(values["hugonnet_vol_rate"], 2),
             "percent_difference": round(values["percent_difference"]),
-            "sigma_low": round(values["sigma_low"], 1),
-            "sigma_high": round(values["sigma_high"], 1),
+            # Preformatted, since reporting renders every float with two decimals
+            "sigma_low": f"{values['sigma_low']:.1f}",
+            "sigma_high": f"{values['sigma_high']:.1f}",
             "percent_less_negative": round(values["percent_less_negative"]),
             "percent_less_negative_err": round(values["percent_less_negative_err"]),
         }

@@ -173,7 +173,8 @@ def summary(our_mass_rates: dict[str, common.Estimate]) -> dict[str, object]:
             ("high", "sigma_independent"),
         ):
             theirs = common.Estimate(window["mass_rate"], window[sigma_key])
-            out[f"sigma_from_ours_{key}_{bound}"] = round(
-                common.sigma_difference(our_mass_rates[key], theirs), 1
+            # Preformatted, since reporting renders every float with two decimals
+            out[f"sigma_from_ours_{key}_{bound}"] = (
+                f"{common.sigma_difference(our_mass_rates[key], theirs):.1f}"
             )
     return out
