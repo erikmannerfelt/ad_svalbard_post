@@ -10,6 +10,11 @@ INFO_PATH = (TABLE_DIR / "statistics.json").resolve()
 
 
 def format_float(number: float, decimals: int = 2) -> str:
+    """Fixed-decimal string of ``number``; ``format_values`` uses two decimals.
+
+    Values meant to be reported with another precision should be formatted with this
+    before they reach ``write_statistics_outputs``, since strings pass through as-is.
+    """
     rounded = str(round(float(number), decimals))
     if "." not in rounded:
         rounded += "." + "0" * decimals

@@ -26,6 +26,7 @@ import pandas as pd
 import rasterio
 import rasterio.features
 
+from .. import reporting
 from . import common
 
 URL: Final = "https://api.npolar.no/dataset/5776cb31-5858-48b6-a9cf-412106c34987/_file/_all?format=zip"
@@ -243,7 +244,7 @@ def summary(our_stats: dict[str, object]) -> dict[str, object]:
         ),
         # The Storisstraumen advance they credited as a gain (positive), see
         # validate_grid_integration
-        "advance_credit_mass_rate": round(
+        "advance_credit_mass_rate": reporting.format_float(
             -float(grid_check.loc["Austfonna", "difference"]), 1
         ),
         "their_surge_area": round(partition["their_surge_area_km2"]),

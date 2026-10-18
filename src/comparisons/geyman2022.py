@@ -31,6 +31,7 @@ from typing import Final
 import numpy as np
 import pandas as pd
 
+from .. import reporting
 from . import common
 
 URL: Final = (
@@ -231,14 +232,16 @@ def summary() -> dict[str, object]:
         "percent_of_rcp_eightyfive_mid_end": round(
             float(benchmark.loc["2019-2024", "percent_of_rcp85"])
         ),
-        "ratio_to_baseline_start_end": round(
+        "ratio_to_baseline_start_end": reporting.format_float(
             float(benchmark.loc["2013-2024", "ratio_to_1936_2010"]), 1
         ),
-        "ratio_to_baseline_mid_end": round(
+        "ratio_to_baseline_mid_end": reporting.format_float(
             float(benchmark.loc["2019-2024", "ratio_to_1936_2010"]), 1
         ),
         "n_matched": contrast["n"],
         "matched_area": round(contrast["area_km2"]),
         "percent_thinning_faster_now": round(contrast["percent_thinning_faster_now"]),
-        "median_per_glacier_ratio": round(contrast["median_per_glacier_ratio"], 1),
+        "median_per_glacier_ratio": reporting.format_float(
+            contrast["median_per_glacier_ratio"], 1
+        ),
     }

@@ -32,7 +32,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from .. import sampling
+from .. import reporting, sampling
 from ..config import CRS_EPSG, INPUT_DIR
 from . import common
 
@@ -332,22 +332,21 @@ def summary() -> dict[str, object]:
             "our_vol_rate_err": round(values["our_vol_rate_err"], 2),
             "hugonnet_vol_rate": round(values["hugonnet_vol_rate"], 2),
             "percent_difference": round(values["percent_difference"]),
-            # Preformatted, since reporting renders every float with two decimals
-            "sigma_low": f"{values['sigma_low']:.1f}",
-            "sigma_high": f"{values['sigma_high']:.1f}",
+            "sigma_low": reporting.format_float(values["sigma_low"], 1),
+            "sigma_high": reporting.format_float(values["sigma_high"], 1),
             "percent_less_negative": round(values["percent_less_negative"]),
             "percent_less_negative_err": round(values["percent_less_negative_err"]),
         }
         for name, values in subset_comparison().items()
     }
     return {
-        "elev_rate_start_mid": round(reference["elev_rate"], 3),
+        "elev_rate_start_mid": round(reference["elev_rate"], 2),
         "vol_rate_start_mid": round(reference["vol_rate"], 2),
         "mass_rate_start_mid": round(reference["mass_rate"], 2),
         "area": round(region_area_km2()),
         "n_matched": len(merged),
         "matched_area": round(float(merged["area_km2"].sum())),
-        "mannwhitney_p": round(specificity["mannwhitney_p"], 3),
+        "mannwhitney_p": reporting.format_float(specificity["mannwhitney_p"], 3),
         "storisstraumen_share_percent": round(
             specificity["storisstraumen_share_percent"]
         ),

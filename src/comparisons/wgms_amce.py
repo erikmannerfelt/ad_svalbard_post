@@ -32,6 +32,7 @@ from typing import Final
 import numpy as np
 import pandas as pd
 
+from .. import reporting
 from . import common
 
 VERSION: Final = "2026-02-10"
@@ -148,19 +149,27 @@ def summary(our_mass_rates: dict[str, common.Estimate]) -> dict[str, object]:
     mid_end_first_year = MATCHED_WINDOWS["mid_end"][0]
     out: dict[str, object] = {
         "version": VERSION,
-        "mass_rate_start_mid": round(contrast["start_mid_mass_rate"], 1),
-        "mass_rate_mid_end": round(contrast["mid_end_mass_rate"], 1),
-        "mass_rate_start_end": round(contrast["start_end_mass_rate"], 1),
-        "sigma_start_mid": round(contrast["start_mid_sigma_correlated"], 1),
-        "sigma_mid_end": round(contrast["mid_end_sigma_correlated"], 1),
-        "sigma_start_end": round(full["sigma_correlated"], 1),
+        "mass_rate_start_mid": reporting.format_float(
+            contrast["start_mid_mass_rate"], 1
+        ),
+        "mass_rate_mid_end": reporting.format_float(contrast["mid_end_mass_rate"], 1),
+        "mass_rate_start_end": reporting.format_float(
+            contrast["start_end_mass_rate"], 1
+        ),
+        "sigma_start_mid": reporting.format_float(
+            contrast["start_mid_sigma_correlated"], 1
+        ),
+        "sigma_mid_end": reporting.format_float(
+            contrast["mid_end_sigma_correlated"], 1
+        ),
+        "sigma_start_end": reporting.format_float(full["sigma_correlated"], 1),
         "final_year_mass_rate": round(window_mean(FINAL_YEAR, FINAL_YEAR)["mass_rate"]),
-        "mass_rate_mid_end_incl_final_year": round(
+        "mass_rate_mid_end_incl_final_year": reporting.format_float(
             window_mean(mid_end_first_year, FINAL_YEAR)["mass_rate"], 1
         ),
-        "ratio": round(contrast["ratio"], 1),
+        "ratio": reporting.format_float(contrast["ratio"], 1),
         "area": round(full["area_km2"]),
-        "amce_dussaillant_window": round(version["amce_2015_2024"], 1),
+        "amce_dussaillant_window": reporting.format_float(version["amce_2015_2024"], 1),
         "dussaillant_published": DUSSAILLANT_2015_2024.value,
         "version_percent_difference": round(version["percent_difference"]),
     }
@@ -173,8 +182,7 @@ def summary(our_mass_rates: dict[str, common.Estimate]) -> dict[str, object]:
             ("high", "sigma_independent"),
         ):
             theirs = common.Estimate(window["mass_rate"], window[sigma_key])
-            # Preformatted, since reporting renders every float with two decimals
-            out[f"sigma_from_ours_{key}_{bound}"] = (
-                f"{common.sigma_difference(our_mass_rates[key], theirs):.1f}"
+            out[f"sigma_from_ours_{key}_{bound}"] = reporting.format_float(
+                common.sigma_difference(our_mass_rates[key], theirs), 1
             )
     return out

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Final
 
+from .. import reporting
 from . import common
 
 #: ATL11 cycles 3-11 span 29 March 2019 to 23 June 2021 (their Section 3.1).
@@ -88,13 +89,14 @@ def summary(
         "elev_rate": ELEV_RATE.value,
         "mass_rate_headline": MASS_RATE_HEADLINE.value,
         "implied_bulk_density": round(attribution["implied_bulk_density"]),
-        "reconverted_mass_rate": round(attribution["reconverted_mass_rate"], 1),
+        "reconverted_mass_rate": reporting.format_float(
+            attribution["reconverted_mass_rate"], 1
+        ),
         "percent_explained_by_density": round(
             attribution["percent_explained_by_density"]
         ),
-        # Preformatted, since reporting renders every float with two decimals
-        "sigma_from_ours_volume": (
-            f"{common.sigma_difference(our_volume_rate, VOLUME_RATE):.1f}"
+        "sigma_from_ours_volume": reporting.format_float(
+            common.sigma_difference(our_volume_rate, VOLUME_RATE), 1
         ),
         "area": int(AREA_KM2),
     }

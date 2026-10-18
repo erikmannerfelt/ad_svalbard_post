@@ -23,7 +23,7 @@ import pandas as pd
 import tqdm.contrib.concurrent
 import xarray as xr
 
-from . import outlines, tools
+from . import outlines, reporting, tools
 from .config import CACHE_DIR, INPUT_DIR, TABLE_DIR
 
 YEARS: Final = tuple(range(2013, 2025))
@@ -218,7 +218,9 @@ def get_coverage_stats(force_redo: tools.ForceRedo = False) -> dict[str, object]
     mode = dataset["quality_mode"].to_numpy()[glaciers]
     mode = mode[mode > 0]
     source = {
-        QUALITY_KEYS[flag]: round(100 * float(np.mean(mode == flag)), 1)
+        QUALITY_KEYS[flag]: reporting.format_float(
+            100 * float(np.mean(mode == flag)), 1
+        )
         for flag in QUALITY_KEYS
     }
     pixel_area_km2 = float(dataset.attrs["transform"][0]) ** 2 / 1e6
@@ -250,7 +252,7 @@ def get_coverage_stats(force_redo: tools.ForceRedo = False) -> dict[str, object]
         "source": source,
         "source_area": source_area,
         "leverage": {
-            k: round(v, 3)
+            k: reporting.format_float(v, 3)
             for k, v in seasonal_trend_leverage(season["melt_fraction"]).items()
         },
         "melt_start_doy": MELT_START_DOY,
