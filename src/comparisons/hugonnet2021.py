@@ -16,6 +16,10 @@ and other glaciers alike, and excluding the large surges does not close the gap.
 Glaciers are linked through the full RGI7-RGI6 overlap table
 (:func:`common.load_rgi6_links`): each of our glaciers gets the overlap-area-weighted
 mean of the RGI6 rates that overlap it, which covers practically all our glacier area.
+
+:func:`method_specificity` asks the same of the co-registration method: on glaciers
+not affected by surging, the offset is the same where the strips were globally
+deramped as where they were rigidly co-registered.
 """
 
 from __future__ import annotations
@@ -29,6 +33,7 @@ import pandas as pd
 from scipy import stats
 
 from .. import sampling
+from ..config import CRS_EPSG, INPUT_DIR
 from . import common
 
 DATA_DIR: Final = common.COMPARISON_DIR / "hugonnet2021"
@@ -46,6 +51,10 @@ ANNUAL_PERIODS_13_18: Final[tuple[str, ...]] = (
 
 #: 1-sigma dh/dt errors of their published 5-year windows bracket this range.
 ELEV_ERR_RANGE: Final[tuple[float, float]] = (0.035, 0.090)
+
+#: Manually drawn regions where the strips are globally deramped instead of rigidly
+#: co-registered (``adsvalbard.mosaicking``), in the auxiliary files.
+DERAMP_REGIONS_NAME: Final = "bad_coreg_regions.geojson"
 
 #: Large surges of 2013-2018, excluded together in :func:`subset_comparison`
 LARGE_SURGES: Final[tuple[str, ...]] = (
@@ -243,6 +252,52 @@ def surge_specificity() -> dict[str, float]:
     }
 
 
+def method_specificity() -> dict[str, dict[str, float]]:
+    """Test whether the offset from Hugonnet depends on the co-registration method.
+
+    A glacier counts as deramped when most of its 2013-2018 area lies inside the
+    deramping regions; the 2 km blending margin around them is ignored. Surge-affected
+    glaciers are left out, since three of the largest offsets (Storisstraumen,
+    Austfonna Basin-2 and Stonebreen) are surges inside the regions and would
+    otherwise be attributed to the method. Percent differences are not reported,
+    since the deramped ice caps' rates are close to zero in Hugonnet's product.
+
+    Returns
+    -------
+    dict
+        Per method (``deramped``, ``rigid``): ``n``, ``area`` (km^2) and the
+        area-weighted mean ``elev_diff`` (ours minus theirs, m a^-1).
+    """
+    regions = gpd.read_file(
+        f"/vsizip/{INPUT_DIR / 'aux_files.zip'}/{DERAMP_REGIONS_NAME}"
+    ).to_crs(CRS_EPSG)
+    sampled = gpd.read_feather(common.SAMPLED_PATH).set_geometry("geometry_13_18")
+    sampled = sampled.to_crs(CRS_EPSG)
+    inside_fraction = pd.Series(
+        (
+            sampled.geometry.intersection(regions.union_all()).area
+            / sampled.geometry.area
+        ).to_numpy(),
+        index=sampled["rgi_id"],
+    )
+
+    merged = matched_glaciers()
+    nonsurging = merged[~merged["surging"]]
+    deramped = nonsurging["rgi_id"].map(inside_fraction).fillna(0.0) > 0.5
+    results = {}
+    for name, subset in (
+        ("deramped", nonsurging[deramped]),
+        ("rigid", nonsurging[~deramped]),
+    ):
+        area = float(subset["area_km2"].sum())
+        results[name] = {
+            "n": len(subset),
+            "area": area,
+            "elev_diff": float((subset["elev_diff"] * subset["area_km2"]).sum()) / area,
+        }
+    return results
+
+
 def offset_geography() -> pd.DataFrame:
     """Per-zone breakdown of the offset, excluding the Storisstraumen outlier."""
     merged = matched_glaciers()
@@ -287,4 +342,12 @@ def summary() -> dict[str, object]:
             specificity["storisstraumen_share_percent"]
         ),
         "subsets": subsets,
+        "method": {
+            name: {
+                "n": values["n"],
+                "area": round(values["area"]),
+                "elev_diff": round(values["elev_diff"], 2),
+            }
+            for name, values in method_specificity().items()
+        },
     }
