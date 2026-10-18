@@ -155,7 +155,7 @@ def plot_surge_nosurge_bar(show: bool = True, full_range: bool = False):
             ax.add_patch(plt.Rectangle((extent[0], extent[2]), width=extent[1] - extent[0], height=extent[3] - extent[2], facecolor="none", edgecolor="#777", linewidth=1))
             for _, row in data.loc[data["stack_vol"] > 1].iterrows():
                 ax.annotate(row["glac_name"], (x, -row["mid"]), ha="center", va="center", fontsize=9)
-        ax.xaxis.set_ticks([0, 1], ["Nonsurging", "Surging"])
+        ax.xaxis.set_ticks([0, 1], ["Other glaciers", "Surge-affected"])
         ax.set_xlim(-0.5, 1.5)
         ax.set_ylim(-24, 0)
         ax.axhline(0, color="#444", linewidth=0.6)
