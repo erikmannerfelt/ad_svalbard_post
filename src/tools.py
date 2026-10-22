@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import io
+import shutil
+import urllib.request
 import zipfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, TypeAlias
 
 import numpy as np
 import pandas as pd
 
-from .config import INPUT_DIR
+from .config import INPUT_DIR, MIRROR_DIR
 
 #: Cache-invalidation mode shared by every derived-cache API in this package.
 #: ``False`` uses an existing cache; ``"self"`` recomputes only the current artifact
@@ -101,3 +104,47 @@ def read_aux_csv(name: str, **kwargs) -> pd.DataFrame:
 
 def read_aux_zip(name: str) -> zipfile.ZipFile:
     return zipfile.ZipFile(io.BytesIO(read_aux_bytes(name)))
+
+
+def fetch(url: str, target: Path, refresh_download: bool = False) -> Path:
+    """Return ``target``, downloading it from ``url`` if it is not already on disk.
+
+    Resolution order: ``target`` itself; then a file of the same name in the local
+    mirror directory (`config.MIRROR_DIR`); then the network. The download is written
+    to a temporary sibling and installed with :meth:`Path.replace`, so an interrupted
+    fetch cannot leave a truncated file that looks usable.
+
+    Parameters
+    ----------
+    url
+        Source URL, recorded in the calling module next to the dataset it serves.
+    target
+        Where to store the file, normally under `config.INPUT_DIR`.
+    refresh_download
+        Re-download even if a local copy exists.
+
+    Returns
+    -------
+    Path
+        ``target``.
+    """
+    if target.is_file() and not refresh_download:
+        return target
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    mirrored = MIRROR_DIR / target.name
+    temporary = target.with_name(f"{target.stem}.tmp{target.suffix}")
+    try:
+        if mirrored.is_file() and not refresh_download:
+            shutil.copyfile(mirrored, temporary)
+        else:
+            print(f"downloading {target.name} from {url}")
+            with (
+                urllib.request.urlopen(url) as response,
+                open(temporary, "wb") as handle,
+            ):
+                shutil.copyfileobj(response, handle)
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return target

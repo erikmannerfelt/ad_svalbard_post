@@ -1,20 +1,16 @@
 """Shared helpers for comparing this study with published Svalbard estimates.
 
 Each sibling module wraps one published dataset. The conventions they share are
-defined here: where downloaded source data is cached, how it is fetched, the value
-type used to carry a rate with its uncertainty, and the RGI6-to-RGI7 glacier links
-needed to join any RGI6-indexed product to our outlines.
+defined here: where downloaded source data is cached, the value type used to carry
+a rate with its uncertainty, and the RGI6-to-RGI7 glacier links needed to join any
+RGI6-indexed product to our outlines.
 
-Source archives are downloaded on demand rather than committed, so that the
-comparison is reproducible from the URLs alone. A local mirror directory is
-consulted first, which keeps a fresh checkout from re-downloading files that are
-already on disk (some are >100 MB).
+Source archives are downloaded on demand by `tools.fetch()` rather than committed,
+so that the comparison is reproducible from the URLs alone.
 """
 
 from __future__ import annotations
 
-import shutil
-import urllib.request
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,13 +19,10 @@ from typing import Final
 import numpy as np
 import pandas as pd
 
+from .. import tools
 from ..config import INPUT_DIR, PROJECT_DIR
 
 COMPARISON_DIR: Final = INPUT_DIR / "comparisons"
-
-# Files a user may already have downloaded by hand are picked up from here rather
-# than fetched again. Nothing is required to be present.
-MIRROR_DIR: Final = PROJECT_DIR.parent / "resources"
 
 #: The full RGI7-RGI6 overlap table, with clusters of connected glaciers. The table
 #: shipped inside the RGI7 archive holds only 36 one-to-one links for this region.
@@ -81,51 +74,6 @@ def sigma_difference(a: Estimate, b: Estimate) -> float:
     return abs(a.value - b.value) / float(np.hypot(a.error, b.error))
 
 
-def fetch(url: str, filename: str, refresh_download: bool = False) -> Path:
-    """Return a local path to ``filename``, downloading from ``url`` if needed.
-
-    Resolution order: the cached copy under ``input/comparisons``; then the local
-    mirror directory; then the network. The download is written to a uniquely named
-    temporary sibling and installed with :meth:`Path.replace`, so an interrupted
-    fetch cannot leave a truncated file that looks usable.
-
-    Parameters
-    ----------
-    url
-        Source URL, recorded in the calling module next to the dataset it serves.
-    filename
-        Name to store the file under in the cache directory.
-    refresh_download
-        Re-download even if a cached copy exists.
-
-    Returns
-    -------
-    Path
-        Location of the local file.
-    """
-    target = COMPARISON_DIR / filename
-    if target.is_file() and not refresh_download:
-        return target
-
-    COMPARISON_DIR.mkdir(parents=True, exist_ok=True)
-    mirrored = MIRROR_DIR / filename
-    temporary = target.with_name(f"{target.stem}.tmp{target.suffix}")
-    try:
-        if mirrored.is_file() and not refresh_download:
-            shutil.copyfile(mirrored, temporary)
-        else:
-            print(f"downloading {filename} from {url}")
-            with (
-                urllib.request.urlopen(url) as response,
-                open(temporary, "wb") as handle,
-            ):
-                shutil.copyfileobj(response, handle)
-        temporary.replace(target)
-    finally:
-        temporary.unlink(missing_ok=True)
-    return target
-
-
 def read_zip_member(archive: Path, member: str) -> bytes:
     """Read one member of a zip archive into memory."""
     with zipfile.ZipFile(archive) as opened, opened.open(member) as handle:
@@ -144,7 +92,9 @@ def load_rgi6_links(refresh_download: bool = False) -> pd.DataFrame:
         Columns ``rgi7_id``, ``rgi6_id``, ``overlap_area_km2``, the two reciprocal
         area fractions and ``cluster_id`` (connected group of linked glaciers).
     """
-    path = fetch(RGI6_LINKS_URL, RGI6_LINKS_FILENAME, refresh_download=refresh_download)
+    path = tools.fetch(
+        RGI6_LINKS_URL, COMPARISON_DIR / RGI6_LINKS_FILENAME, refresh_download=refresh_download
+    )
     links = pd.read_csv(path)
     return links[
         [

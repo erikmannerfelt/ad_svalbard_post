@@ -2,7 +2,6 @@ from . import (
     coreg,
     coverage,
     examples,
-    hypsometry,
     overview,
     surge,
     surge_examples,
@@ -32,12 +31,6 @@ def make_all_figures(show: bool = False):
     print("Generating surge bar figure")
     surge.plot_surge_nosurge_bar(show=show)
 
-    print("Generating surge comparison figures")
-    surge.plot_surging_vs_nonsurging_figures(show=show)
-
-    print("Generating post-surge anomaly figure")
-    surge.plot_postsurge_anomaly_by_time(show=show)
-
     print("Generating surge examples figure")
     surge_examples.plot_surge_examples(show=show)
 
@@ -55,9 +48,6 @@ def make_all_figures(show: bool = False):
 
     print("Generating baseline error variogram figure")
     uncertainty.plot_baseline_err_variogram(show=show)
-
-    print("Generating hypsometry figure")
-    hypsometry.plot_hypsometric_profiles(show=show)
 
     print("Generating elevation change examples figure")
     examples.plot_elevation_change_examples(show=show)

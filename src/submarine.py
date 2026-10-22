@@ -1,7 +1,7 @@
 """Submarine (below-sea-level) glacier volume change from marine-front retreat and advance.
 
-Reads the published products of the sibling `SvalbardSubmarineRetreat` repo
-rather than computing anything geometric here. That repo builds, per RGI7
+Reads the published products of the `SvalbardSubmarineRetreat` repo (copied into
+``input/``) rather than computing anything geometric here. That repo builds, per RGI7
 tidewater glacier, the retreat and advance polygons between the NPI coastlines
 of 2012, 2018 and 2023, merges six bed/ice-thickness products into gap-free
 100 m beds (IBCAO soundings at sea, the model's own inversion under former
@@ -46,18 +46,14 @@ import geopandas as gpd
 import pandas as pd
 
 from . import tools
-from .config import CRS_EPSG, PROJECT_DIR
+from .config import CRS_EPSG, INPUT_DIR
 
 #: Solid ice below the water line; see `main.tex`, "Conversion to mass change".
 RHO_SUB: Final = 900.0
 
-SUBMARINE_REPO_DIR: Final = PROJECT_DIR.parent / "SvalbardSubmarineRetreat"
-SUBMARINE_PRODUCT_PATH: Final = (
-    SUBMARINE_REPO_DIR / "products" / "submarine_volume_change.arrow"
-)
-BED_VALIDATION_PATH: Final = (
-    SUBMARINE_REPO_DIR / "products" / "bed_model_validation.csv"
-)
+#: Copies of `SvalbardSubmarineRetreat`'s ``products/`` files, as in the data publication.
+SUBMARINE_PRODUCT_PATH: Final = INPUT_DIR / "submarine_volume_change.arrow"
+BED_VALIDATION_PATH: Final = INPUT_DIR / "bed_model_validation.csv"
 
 #: Bed models whose mean and half-range form the submarine estimate.
 BED_MODELS: Final = ("svift_v11", "maffezzoli", "frank", "vanpelt")
@@ -105,8 +101,9 @@ def read_submarine_product() -> gpd.GeoDataFrame:
     """
     if not SUBMARINE_PRODUCT_PATH.is_file():
         raise FileNotFoundError(
-            f"{SUBMARINE_PRODUCT_PATH} not found; build it in SvalbardSubmarineRetreat "
-            "with volume.make_submarine_volume_product()"
+            f"{SUBMARINE_PRODUCT_PATH} not found; take it from the data publication, or "
+            "build it in SvalbardSubmarineRetreat (volume.make_submarine_volume_product()) "
+            "and copy it from that repo's products/"
         )
     product = gpd.read_feather(SUBMARINE_PRODUCT_PATH)
 
@@ -176,6 +173,33 @@ def get_submarine_changes(
         One of `COASTLINE_YEARS`, e.g. ``"13_18"``.
     product
         A frame from `read_submarine_product`; read if not given.
+
+    Examples
+    --------
+    Glacier ``a`` retreats and advances in 2012-2018; glacier ``b`` changes only in
+    2018-2023 and so does not appear for ``"13_18"``.
+
+    >>> product = gpd.GeoDataFrame(
+    ...     {
+    ...         "rgi_id": ["a", "a", "b"],
+    ...         "year_from": [2012, 2012, 2018],
+    ...         "year_to": [2018, 2018, 2023],
+    ...         "change_type": ["retreat", "advance", "retreat"],
+    ...         "area_m2": 1e6,
+    ...     }
+    ... )
+    >>> for model in (*BED_MODELS, *EXCLUDED_BED_MODELS):
+    ...     product[f"{model}_volume_change_m3"] = [6e9, 1.2e9, 5e9]
+    ...     product[f"{model}_interpolated_share"] = 0.5
+    >>> changes = get_submarine_changes("13_18", product)
+    >>> changes.dt_yr
+    6.0
+    >>> list(changes.per_glacier.index)
+    ['a']
+    >>> changes.per_glacier.loc["a", ["svift_v11", "retreat_area", "advance_area"]].tolist()
+    [-800000000.0, 1000000.0, 1000000.0]
+    >>> interpolated_share(changes.per_glacier, "frank")
+    0.5
     """
     tools.get_interval(interval_short)  # validates the short code
     if product is None:
@@ -229,6 +253,16 @@ def aggregate_submarine(per_glacier_subset: pd.DataFrame) -> tuple[float, float]
     ...                       "frank": [-1.0, 0.0], "vanpelt": [-1.5, -0.5]})
     >>> aggregate_submarine(frame)
     (-1.5, 0.5)
+
+    Each glacier alone has a half-range of 1 here, but the opposite-signed model
+    errors cancel in the total, which a per-glacier quadrature would miss. The
+    excluded Millan column never enters:
+
+    >>> frame = pd.DataFrame({"svift_v11": [-2.0, 0.0], "maffezzoli": [0.0, -2.0],
+    ...                       "frank": [-1.0, -1.0], "vanpelt": [-1.0, -1.0],
+    ...                       "millan": [-100.0, -100.0]})
+    >>> aggregate_submarine(frame)
+    (-2.0, 0.0)
     """
     totals = per_glacier_subset.loc[:, list(BED_MODELS)].sum()
     return float(totals.mean()), float((totals.max() - totals.min()) / 2)

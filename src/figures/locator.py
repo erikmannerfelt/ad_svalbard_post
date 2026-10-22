@@ -15,7 +15,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import shapely
 
-from ..comparisons import common
+from .. import tools
+from ..config import INPUT_DIR
 
 NATURAL_EARTH_URL: Final = (
     "https://naciscdn.org/naturalearth/50m/cultural/ne_50m_admin_0_countries.zip"
@@ -45,7 +46,7 @@ def visible_countries(
     polygons are first clipped in an azimuthal equidistant projection with the same
     centre, where the visible hemisphere is exactly a disk of radius pi/2 * R.
     """
-    path = common.fetch(NATURAL_EARTH_URL, "ne_50m_admin_0_countries.zip")
+    path = tools.fetch(NATURAL_EARTH_URL, INPUT_DIR / "ne_50m_admin_0_countries.zip")
     countries = gpd.read_file(f"zip://{path}")
     countries = countries[countries["CONTINENT"] != "Antarctica"]
     # Densify so that long straight edges follow the curvature of the projection.

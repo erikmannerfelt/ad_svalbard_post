@@ -26,7 +26,7 @@ import pandas as pd
 import rasterio
 import rasterio.features
 
-from .. import reporting
+from .. import reporting, tools
 from . import common
 
 URL: Final = "https://api.npolar.no/dataset/5776cb31-5858-48b6-a9cf-412106c34987/_file/_all?format=zip"
@@ -49,7 +49,7 @@ AREA_KM2: Final = 33773.0
 def archive(refresh_download: bool = False):
     """Return the opened data-publication archive."""
     return zipfile.ZipFile(
-        common.fetch(URL, FILENAME, refresh_download=refresh_download)
+        tools.fetch(URL, common.COMPARISON_DIR / FILENAME, refresh_download=refresh_download)
     )
 
 

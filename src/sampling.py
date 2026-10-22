@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import warnings
-from pathlib import Path
 from typing import Final
 
 import geopandas as gpd
@@ -126,7 +125,7 @@ def sample_rasters(redo: bool = False, overview_level: int | None = 2, use_tqdm:
         base_keys.append(base_key)
 
         paths = {
-            base_key: Path(f"input/trend_{interval.filename_label}_{kind}.tif"),
+            base_key: INPUT_DIR / f"trend_{interval.filename_label}_{kind}.tif",
         }
         paths[base_key + "_baseline_err_unscaled"] = paths[base_key].parent / f"trend_{interval.filename_label}_{kind}_baseline_err.tif"
         paths[base_key + "_fit_err"] = paths[base_key].parent / f"trend_{interval.filename_label}_{kind}_fit_err.tif"

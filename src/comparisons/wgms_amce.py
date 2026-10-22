@@ -32,7 +32,7 @@ from typing import Final
 import numpy as np
 import pandas as pd
 
-from .. import reporting
+from .. import reporting, tools
 from . import common
 
 VERSION: Final = "2026-02-10"
@@ -63,7 +63,7 @@ def load_regional_series(refresh_download: bool = False) -> pd.DataFrame:
         Indexed by hydrological year, with ``gt``, ``gt_sigma``, ``mwe``,
         ``mwe_sigma`` and ``area_km2``.
     """
-    path = common.fetch(URL, FILENAME, refresh_download=refresh_download)
+    path = tools.fetch(URL, common.COMPARISON_DIR / FILENAME, refresh_download=refresh_download)
     payload = common.read_zip_member(path, REGION_MEMBER)
     return pd.read_csv(io.StringIO(payload.decode()), comment="#").set_index("year")
 

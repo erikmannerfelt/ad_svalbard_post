@@ -8,6 +8,7 @@ import numpy as np
 
 from .. import outlines
 from .. import statistics
+from ..config import FIGURE_DIR, INPUT_DIR
 from . import locator
 from .common import DHDT_NORMALIZER, DHDT_SM, svg_png_to_jpg
 
@@ -121,8 +122,8 @@ def dhdt_overview_fig(show: bool = True):
     # fig = plt.figure(figsize=(8.3, 5.3))
     # axes = fig.subplots(1, 2, sharex=True, sharey=True).ravel().tolist()
     all_params = [
-        {"filepath": "input/trend_2013-2018_slope.tif", "title": "2013–2018", "coast": coasts.loc["13_18"]},
-        {"filepath": "input/trend_2019-2024_slope.tif", "title": "2019–2024", "coast": coasts.loc["19_24"]},
+        {"filepath": INPUT_DIR / "trend_2013-2018_slope.tif", "title": "2013–2018", "coast": coasts.loc["13_18"]},
+        {"filepath": INPUT_DIR / "trend_2019-2024_slope.tif", "title": "2019–2024", "coast": coasts.loc["19_24"]},
     ]
     for i, params in enumerate(all_params):
 
@@ -288,21 +289,10 @@ def dhdt_overview_fig(show: bool = True):
 
     # axes[0].set_ylabel("Northing (m; UTM 33N)")
     plt.subplots_adjust(left=0.09, bottom=0.09, right=0.9, top=0.95, wspace=0)
-    out_path = "figures/perinterval_slope_overview.svg"
+    out_path = FIGURE_DIR / "perinterval_slope_overview.svg"
     plt.savefig(out_path, dpi=400)
     svg_png_to_jpg(out_path)
 
-
-    return
-    for axis in axes:
-        axis.set_xlim(614000, 740000)
-        axis.set_ylim(8790000, 8950000)
-    for item in inset_items:
-        item.remove()
-    add_inset_cbar(axes[1], left=0.75)
-    out_path2 = "figures/perinterval_slope_austfonna.svg"
-    plt.savefig(out_path2, dpi=400)
-    svg_png_to_jpg(out_path2)
     if show:
         plt.show()
 

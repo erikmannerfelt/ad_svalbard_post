@@ -31,7 +31,7 @@ from typing import Final
 import numpy as np
 import pandas as pd
 
-from .. import reporting
+from .. import reporting, tools
 from . import common
 
 URL: Final = (
@@ -66,7 +66,7 @@ def load(refresh_download: bool = False) -> pd.DataFrame:
     The first spreadsheet row holds a merged section banner and the second holds the
     real column names, so the header is taken from the second row.
     """
-    path = common.fetch(URL, FILENAME, refresh_download=refresh_download)
+    path = tools.fetch(URL, common.COMPARISON_DIR / FILENAME, refresh_download=refresh_download)
     raw = pd.read_excel(path, sheet_name="Sheet1", header=None)
     frame = raw.iloc[2:].copy()
     frame.columns = [str(name).strip() for name in raw.iloc[1]]

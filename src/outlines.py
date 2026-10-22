@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Final
 
 import geopandas as gpd
 import numpy as np
@@ -8,8 +9,23 @@ import pandas as pd
 import shapely.ops
 
 from . import tools
-from .config import CACHE_DIR, CRS_EPSG
+from .config import CACHE_DIR, CRS_EPSG, INPUT_DIR, PROJECT_DIR
 from .tools import ForceRedo
+
+#: Svalbard Surge Database V5 (Harcourt et al.): RGI 7.0 outlines for region 07 with
+#: surge attributes. Pinned to the V5 record, not the concept DOI, so a new version
+#: cannot change the outlines silently. V6 is expected to make several entries in
+#: `make_outlines()`'s ``field_overrides`` redundant.
+SURGE_DATABASE_URL: Final = (
+    "https://zenodo.org/records/18033216/files/RGI_V7_Surge_Database.zip?download=1"
+)
+SURGE_DATABASE_PATH: Final = INPUT_DIR / "RGI_V7_Surge_Database.zip"
+SURGE_DATABASE_LAYER: Final = (
+    "RGI_V7_Surge_Database/RGI2000-v7.0-G-07_svalbard_jan_mayen_Surge_Database.shp"
+)
+COASTLINE_PATH: Final = INPUT_DIR / "Coast_annual.zip"
+GLACIER_ZONES_PATH: Final = PROJECT_DIR / "shapes" / "glacier_zones.geojson"
+OUTLINE_CORRECTIONS_PATH: Final = PROJECT_DIR / "shapes" / "outline_corrections.geojson"
 
 
 def surge_overlaps_interval(term_value, onset_value, min_year, max_year) -> bool:
@@ -73,7 +89,7 @@ def make_coastline_intervals(force_redo: ForceRedo = False) -> gpd.GeoDataFrame:
     coastlines = {}
     for year in range(2013, 2025):
         coastline = (
-            gpd.read_file(f"zip://input/Coast_annual.zip/Coast{year}.shp")
+            gpd.read_file(f"zip://{COASTLINE_PATH}!Coast{year}.shp")
             .to_crs(CRS_EPSG)
             .dissolve()
             .iloc[0]["geometry"]
@@ -155,7 +171,9 @@ def _validate_corrections(
         )
 
 
-def make_outlines(force_redo: ForceRedo = False) -> gpd.GeoDataFrame:
+def make_outlines(
+    force_redo: ForceRedo = False, refresh_download: bool = False
+) -> gpd.GeoDataFrame:
     """Build period-specific glacier outlines from RGI 7.0, corrections and annual coastlines.
 
     Returns one geometry per glacier per interval (``geometry_13_18`` etc.), each being the
@@ -197,6 +215,9 @@ def make_outlines(force_redo: ForceRedo = False) -> gpd.GeoDataFrame:
         ``False`` reads ``cache/rgi7_outlines.arrow``; ``"self"`` recomputes these outlines
         while reusing the cached coastline intervals; ``"all"`` also rebuilds those. A full
         rebuild takes a few minutes.
+    refresh_download
+        Re-download the surge database (`SURGE_DATABASE_URL`) before a rebuild. It is
+        otherwise downloaded only if missing.
     """
     cache_path = CACHE_DIR / "rgi7_outlines.arrow"
     intervals = tools.iter_intervals()
@@ -206,7 +227,8 @@ def make_outlines(force_redo: ForceRedo = False) -> gpd.GeoDataFrame:
 
     coasts = make_coastline_intervals(force_redo="all" if force_redo == "all" else False)
 
-    rgi7_orig = gpd.read_file("zip://input/RGI_V7_Surge_Database.zip/RGI_V7_Surge_Database/RGI2000-v7.0-G-07_svalbard_jan_mayen_Surge_Database.shp").to_crs(CRS_EPSG)
+    surge_database = tools.fetch(SURGE_DATABASE_URL, SURGE_DATABASE_PATH, refresh_download=refresh_download)
+    rgi7_orig = gpd.read_file(f"zip://{surge_database}!{SURGE_DATABASE_LAYER}").to_crs(CRS_EPSG)
     rgi7_orig["geometry"] = rgi7_orig["geometry"].buffer(0)
 
     base_cols = [
@@ -247,14 +269,14 @@ def make_outlines(force_redo: ForceRedo = False) -> gpd.GeoDataFrame:
 
     probably_tidewater = rgi7_orig["term_type"].eq(1) | rgi7_orig["zmin_m"].le(25)
 
-    glacier_zones = gpd.read_file("shapes/glacier_zones.geojson").to_crs(CRS_EPSG)[["zone_label", "zone_name", "geometry"]]
+    glacier_zones = gpd.read_file(GLACIER_ZONES_PATH).to_crs(CRS_EPSG)[["zone_label", "zone_name", "geometry"]]
     centroids = gpd.GeoDataFrame(rgi7_orig[["rgi_id"]].copy(), geometry=rgi7_orig.geometry.centroid, crs=CRS_EPSG)
     zone_matches = gpd.sjoin(centroids, glacier_zones, how="left", predicate="within")
     if zone_matches.index.duplicated().any() or zone_matches["zone_label"].isna().any():
         missing = zone_matches.loc[zone_matches["zone_label"].isna(), "rgi_id"].tolist()
         raise RuntimeError(f"Problematic zone assignment. Matched none or too many zones. Missing: {missing}")
 
-    outline_corrections = gpd.read_file("shapes/outline_corrections.geojson")
+    outline_corrections = gpd.read_file(OUTLINE_CORRECTIONS_PATH)
     # Sort key: extensions (False) apply first, partition overrides (True) land on top.
     outline_corrections["is_partition_override"] = outline_corrections["fix_type"].str.contains("partition_override")
     _validate_corrections(outline_corrections, rgi7_orig, probably_tidewater)
@@ -310,7 +332,7 @@ def refine_glacier_zones(force_redo: ForceRedo = False) -> gpd.GeoDataFrame:
     if cache_path.is_file() and not force_redo:
         return gpd.read_feather(cache_path)
 
-    glacier_zones = gpd.read_file("shapes/glacier_zones.geojson").set_index("zone_label")
+    glacier_zones = gpd.read_file(GLACIER_ZONES_PATH).set_index("zone_label")
     coasts = make_coastline_intervals(force_redo="all" if force_redo == "all" else False).loc[["13_24"]].explode().to_crs(glacier_zones.crs)
     coasts = coasts[coasts.geometry.area > 1e8]
     coasts = coasts.dissolve().simplify(100)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -17,7 +18,7 @@ from . import (
     submarine,
     tools,
 )
-from .config import POSITIVE_CHANGE_THRESHOLD
+from .config import INPUT_DIR, POSITIVE_CHANGE_THRESHOLD
 
 _PER_GLACIER_EXPORTS = [
     {"key": "storisstraumen", "glac_name": "Storisstraumen", "surging_13_24": True},
@@ -588,15 +589,15 @@ def compute_hypsometric_profiles():
     @dataclasses.dataclass
     class Config:
         interval: tools.Interval
-        filepath: str
+        filepath: Path
 
     interval_map = {i.short: i for i in tools.iter_intervals()}
     intervals = [
-        Config(interval_map["13_18"], "input/trend_2013-2018_slope.tif"),
-        Config(interval_map["19_24"], "input/trend_2019-2024_slope.tif"),
+        Config(interval_map["13_18"], INPUT_DIR / "trend_2013-2018_slope.tif"),
+        Config(interval_map["19_24"], INPUT_DIR / "trend_2019-2024_slope.tif"),
     ]
 
-    intercept_path = "input/trend_2013-2024_intercept.tif"
+    intercept_path = INPUT_DIR / "trend_2013-2024_intercept.tif"
     with rio.open(intercept_path) as dem_raster_full:
         scale = dem_raster_full.scales[0]
 
