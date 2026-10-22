@@ -32,14 +32,15 @@ or `uv sync`. All commands below are run from the repository root.
 |---|---|---|
 | `input/` | `trend_<period>_slope{,_fit_err,_baseline_err}.tif`, `trend_2019-2024_slope_uncorr.tif`, `trend_2013-2024_intercept.tif`, `dem_<year>_{count,doy,quality}.tif`, `dem_quality_mode.tif`, `aux_files.zip` | Data publication (DOI to be added), produced by ADSvalbard |
 | `input/` | `submarine_volume_change.arrow`, `bed_model_validation.csv` | Data publication, produced by SvalbardSubmarineRetreat |
-| `input/Coast_annual.zip` | Annual coastlines 2013–2024 | To be decided |
 | `input/comparisons/hugonnet2021/` | `dh_07_rgi60_reg_cumul.csv`, `dh_07_rgi60_pergla_rates.csv.zip` | Hugonnet et al. (2021), https://doi.org/10.6096/13 (manual download) |
 
 Everything else is downloaded automatically on first use: the Svalbard surge database
 V5 with its RGI 7.0 outlines (Harcourt et al., https://doi.org/10.5281/zenodo.18033216),
-and the datasets used in the comparisons (Morris et al., 2020; Geyman et al., 2022;
-the WGMS annual mass-change estimates; the RGI 7.0–6.0 links) and in the locator map
-(Natural Earth). The URLs are recorded in the modules that use them.
+the annual coastlines of the Norwegian Polar Institute
+(https://doi.org/10.21334/npolar.2021.21565514), the datasets used in the comparisons
+(Morris et al., 2020; Geyman et al., 2022; the WGMS annual mass-change estimates; the
+RGI 7.0–6.0 links) and Natural Earth for the locator map. The URLs are recorded in the
+modules that use them.
 
 `shapes/` holds the two hand-made vector layers that are part of the method: the glacier
 zones and the outline corrections.

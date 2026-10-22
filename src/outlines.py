@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import MappingProxyType
 from typing import Final
 
 import geopandas as gpd
@@ -23,7 +24,30 @@ SURGE_DATABASE_PATH: Final = INPUT_DIR / "RGI_V7_Surge_Database.zip"
 SURGE_DATABASE_LAYER: Final = (
     "RGI_V7_Surge_Database/RGI2000-v7.0-G-07_svalbard_jan_mayen_Surge_Database.shp"
 )
-COASTLINE_PATH: Final = INPUT_DIR / "Coast_annual.zip"
+#: Annual coastlines for Svalbard (Norwegian Polar Institute,
+#: https://doi.org/10.21334/npolar.2021.21565514): one land-polygon shapefile per year,
+#: keyed by year to the dataset's attachment ids. The same release is used by
+#: SvalbardSubmarineRetreat.
+COASTLINE_ATTACHMENT_URL: Final = (
+    "https://next.api.npolar.no/dataset/21565514-ab3a-432a-ae42-2587bea95a97/attachment/{}/_blob"
+)
+COASTLINE_ATTACHMENTS: Final = MappingProxyType(
+    {
+        2013: "d034d7e1-b715-460d-91ef-39361424fc61",
+        2014: "824b8da2-9b55-40e4-8fe6-ad1284b2c5b3",
+        2015: "6c6aab08-7a54-4b2a-a094-82e1e4932971",
+        2016: "f51bbba4-84d7-4ca2-9f1a-710fe0095751",
+        2017: "32bf6803-5fe1-439e-94c7-bf2920da4229",
+        2018: "dd953513-4743-410b-a51b-461ce16e9e06",
+        2019: "8669960e-80fe-423b-b639-ac81fec64107",
+        2020: "c45e1f5a-7958-46f0-9ee9-eaa8d700e4a7",
+        2021: "34f7cd44-6762-4cda-819d-74f6920ce6ea",
+        2022: "5b501528-6c01-4f5e-b6ea-844196e63ec7",
+        2023: "e499ee72-65f1-4002-83a3-b8de08649978",
+        2024: "95b70b89-4b09-49b7-ac17-063d45d0f61c",
+    }
+)
+COASTLINE_DIR: Final = INPUT_DIR / "coastlines"
 GLACIER_ZONES_PATH: Final = PROJECT_DIR / "shapes" / "glacier_zones.geojson"
 OUTLINE_CORRECTIONS_PATH: Final = PROJECT_DIR / "shapes" / "outline_corrections.geojson"
 
@@ -75,11 +99,21 @@ def _write_feather_atomic(frame: gpd.GeoDataFrame, cache_path: Path) -> None:
         tmp_path.unlink(missing_ok=True)
 
 
-def make_coastline_intervals(force_redo: ForceRedo = False) -> gpd.GeoDataFrame:
+def make_coastline_intervals(
+    force_redo: ForceRedo = False, refresh_download: bool = False
+) -> gpd.GeoDataFrame:
     """Union the annual coastlines into one land polygon per interval.
 
     The union is the *maximum* land extent over the interval, so for a retreating
     tidewater front it is effectively the extent at the start of the interval.
+
+    Parameters
+    ----------
+    force_redo
+        ``False`` reads ``cache/coastline_intervals.arrow``; anything else rebuilds it.
+    refresh_download
+        Re-download the annual coastlines (`COASTLINE_ATTACHMENTS`) before a rebuild.
+        They are otherwise downloaded only if missing.
     """
     cache_path = CACHE_DIR / "coastline_intervals.arrow"
 
@@ -87,9 +121,14 @@ def make_coastline_intervals(force_redo: ForceRedo = False) -> gpd.GeoDataFrame:
         return gpd.read_feather(cache_path).set_index("key")  # type: ignore
 
     coastlines = {}
-    for year in range(2013, 2025):
+    for year, attachment_id in COASTLINE_ATTACHMENTS.items():
+        path = tools.fetch(
+            COASTLINE_ATTACHMENT_URL.format(attachment_id),
+            COASTLINE_DIR / f"Coast{year}.zip",
+            refresh_download=refresh_download,
+        )
         coastline = (
-            gpd.read_file(f"zip://{COASTLINE_PATH}!Coast{year}.shp")
+            gpd.read_file(f"zip://{path}!Coast{year}.shp")
             .to_crs(CRS_EPSG)
             .dissolve()
             .iloc[0]["geometry"]
@@ -216,8 +255,9 @@ def make_outlines(
         while reusing the cached coastline intervals; ``"all"`` also rebuilds those. A full
         rebuild takes a few minutes.
     refresh_download
-        Re-download the surge database (`SURGE_DATABASE_URL`) before a rebuild. It is
-        otherwise downloaded only if missing.
+        Re-download the surge database (`SURGE_DATABASE_URL`), and the annual coastlines
+        if they are rebuilt too, before a rebuild. They are otherwise downloaded only if
+        missing.
     """
     cache_path = CACHE_DIR / "rgi7_outlines.arrow"
     intervals = tools.iter_intervals()
@@ -225,7 +265,9 @@ def make_outlines(
     if cache_path.is_file() and not force_redo:
         return _read_outline_cache(cache_path)
 
-    coasts = make_coastline_intervals(force_redo="all" if force_redo == "all" else False)
+    coasts = make_coastline_intervals(
+        force_redo="all" if force_redo == "all" else False, refresh_download=refresh_download
+    )
 
     surge_database = tools.fetch(SURGE_DATABASE_URL, SURGE_DATABASE_PATH, refresh_download=refresh_download)
     rgi7_orig = gpd.read_file(f"zip://{surge_database}!{SURGE_DATABASE_LAYER}").to_crs(CRS_EPSG)
