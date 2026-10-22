@@ -12,7 +12,7 @@ The rasters' own overviews are average-resampled, which blends categorical and
 day-of-year values, so the sampling reads full-resolution blocks and keeps every
 ``SAMPLE_STRIDE``-th pixel instead. The ``doy`` rasters must be the repaired ones
 (true day of year, 0 where ``count`` is 0; see ``adsvalbard.doy`` in
-``processing_ADSvalbard``), not the legacy ``month * 30 + day`` encoding.
+``ADSvalbard``), not the legacy ``month * 30 + day`` encoding.
 """
 
 from pathlib import Path

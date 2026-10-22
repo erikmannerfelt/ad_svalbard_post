@@ -1,6 +1,6 @@
 """Validation summary for the ArcticDEM strip outlier ("gap") classifier.
 
-`processing_ADSvalbard`'s `evaluate_gap_model_grouped()` runs patch-grouped
+`ADSvalbard`'s `evaluate_gap_model_grouped()` runs patch-grouped
 (`StratifiedGroupKFold` on `patch_id`) cross-validation of the classifier's training
 procedure, replacing the old point-level `train_test_split` that let pixels from the
 same labelled polygon leak between train and test. See that function's docstring for
